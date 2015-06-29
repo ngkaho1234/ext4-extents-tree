@@ -15,7 +15,7 @@ struct arg_table {
 
 void usage(int argc, char **argv)
 {
-	printf("Usage: %s <-f filename> <-s size in MiB>\n", argv[0]);
+	printf("Usage: %s <-f filename> <-n block_count>\n", argv[0]);
 }
 
 static int initialize_bitmap(struct db_header *bhdr, struct super_block *sb)
@@ -45,7 +45,7 @@ int mkdb(struct arg_table *tbl)
 	struct block_device *bdev;
 	struct buffer_head *bh;
 	struct db_header *bhdr;
-	printf("Path: %s, size: %lluMiB\n", tbl->path, tbl->size);
+	printf("Path: %s, size: %llu blocks\n", tbl->path, tbl->size);
 	fd = device_open(tbl->path);
 	if (fd < 0) {
 		perror("mkdb");
@@ -57,7 +57,7 @@ int mkdb(struct arg_table *tbl)
 		fprintf(stderr, "mkdb: ""Insufficient resoures.\n");
 		return -1;
 	}
-	simple_balloc(bdev->bd_super, (tbl->size * 1024 * 1024) / (1 << DB_BLOCKSIZE_BITS));
+	simple_balloc(bdev->bd_super, (tbl->size));
 	bh = sb_getblk(bdev->bd_super, 0);
 	if (!bh) {
 		close(fd);
@@ -66,7 +66,7 @@ int mkdb(struct arg_table *tbl)
 	memset(bh->b_data, 0, bh->b_size);
 	bhdr = (struct db_header *)bh->b_data;
 	bhdr->db_magic = DB_MAGIC;
-	bhdr->db_nrblocks = (tbl->size * 1024 * 1024) / (1 << DB_BLOCKSIZE_BITS);
+	bhdr->db_nrblocks = (tbl->size);
 	bhdr->db_bitmap_block = 1;
 	bhdr->db_nrblocks = device_size(bdev->bd_super->s_bdev) >> bdev->bd_super->s_blocksize_bits;
 	set_buffer_dirty(bh);
@@ -83,9 +83,9 @@ int main(int argc, char **argv)
 	int opt;
 	struct arg_table argtbl;
 
-	while ((opt = getopt(argc, argv, "s:f:")) != -1) {
+	while ((opt = getopt(argc, argv, "n:f:")) != -1) {
 		switch (opt) {
-		case 's':
+		case 'n':
 			argtbl.size = atoll(optarg);
 			break;
 		case 'f':

@@ -116,20 +116,20 @@ static inline int ext4_ext_space_root_idx(struct inode *inode, int check)
 	return size;
 }
 
-static int ext4_ext_max_entries(struct inode *inode, int depth)
+static int ext4_ext_max_entries(struct inode *inode, int depth, int check)
 {
 	int max;
 
 	if (depth == ext_depth(inode)) {
 		if (depth == 0)
-			max = ext4_ext_space_root(inode, 1);
+			max = ext4_ext_space_root(inode, check);
 		else
-			max = ext4_ext_space_root_idx(inode, 1);
+			max = ext4_ext_space_root_idx(inode, check);
 	} else {
 		if (depth == 0)
-			max = ext4_ext_space_block(inode, 1);
+			max = ext4_ext_space_block(inode, check);
 		else
-			max = ext4_ext_space_block_idx(inode, 1);
+			max = ext4_ext_space_block_idx(inode, check);
 	}
 
 	return max;
@@ -460,6 +460,14 @@ err:
 	return ret;
 }
 
+static int ext4_ext_init_header(struct inode *inode, struct ext4_extent_header *eh, int depth)
+{
+	eh->eh_entries = 0;
+	eh->eh_max = cpu_to_le16(ext4_ext_max_entries(inode, depth, 0));
+	eh->eh_magic = cpu_to_le16(EXT4_EXT_MAGIC);
+	eh->eh_depth = depth;
+}
+
 /*
  * Be cautious, the buffer_head returned is not yet mark dirtied. */
 static int ext4_ext_split_node(struct inode *inode,
@@ -492,10 +500,7 @@ static int ext4_ext_split_node(struct inode *inode,
 		int m = EXT_MAX_EXTENT(path[at].p_hdr) - path[at].p_ext;
 		struct ext4_extent_header *neh;
 		neh = ext_block_hdr(bh);
-		neh->eh_entries = 0;
-		neh->eh_max = cpu_to_le16(ext4_ext_space_block(inode, 0));
-		neh->eh_magic = cpu_to_le16(EXT4_EXT_MAGIC);
-		neh->eh_depth = 0;
+		ext4_ext_init_header(inode, neh, 0);
 		if (m) {
 			struct ext4_extent *ex;
 			ex = EXT_FIRST_EXTENT(neh);
@@ -511,10 +516,7 @@ static int ext4_ext_split_node(struct inode *inode,
 		int m = EXT_MAX_INDEX(path[at].p_hdr) - path[at].p_idx;
 		struct ext4_extent_header *neh;
 		neh = ext_block_hdr(bh);
-		neh->eh_entries = 0;
-		neh->eh_max = cpu_to_le16(ext4_ext_space_block(inode, depth - at));
-		neh->eh_magic = cpu_to_le16(EXT4_EXT_MAGIC);
-		neh->eh_depth = cpu_to_le16(depth - at);
+		ext4_ext_init_header(inode, neh, depth - at);
 		if (m) {
 			struct ext4_extent_idx *ix;
 			ix = EXT_FIRST_INDEX(neh);
