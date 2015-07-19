@@ -996,6 +996,85 @@ void print_path(struct ext4_ext_path *path)
 int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext)
 {
 	int i, depth, level, ret = 0;
+	ext4_fsblk_t ptr = 0, *new_blocks = NULL;
+	ext4_lblk_t low_index;
+	struct ext4_ext_path *path = *ppath;
+	struct ext_split_trans newblock = {0};
+
+	depth = ext_depth(inode);
+	for (i = depth, level = 0;i >= 0;i--, level++)
+		if (EXT_HAS_FREE_INDEX(path + i))
+			break;
+
+	if (level) {
+		new_blocks = kzalloc(sizeof(ext4_fsblk_t) * (level),
+				GFP_NOFS);
+		if (!new_blocks) {
+			ret = -ENOMEM;
+			goto out;
+		}
+	}
+	i = 0;
+again:
+	depth = ext_depth(inode);
+
+	do {
+		if (!i) {
+			ret = ext4_ext_insert_leaf(inode, path, depth - i,
+					     newext, &newblock);
+		} else {
+			ret = ext4_ext_insert_index(inode, path, depth - i,
+					     newext, low_index,
+					     new_blocks[i-1],
+					     &newblock);
+		}
+		ptr = newblock.ptr;
+
+		if (newblock.bh)
+			fs_brelse(newblock.bh);
+
+		if (ret && ret != EXT_INODE_HDR_NEED_GROW)
+			goto out;
+		else if (new_blocks && ptr && !ret) {
+			/* Prepare for the next iteration after splitting. */
+			low_index = newblock.index;
+			new_blocks[i] = ptr;
+		}
+
+		i++;
+	} while (ptr != 0 && i <= depth);
+	
+	if (ret == EXT_INODE_HDR_NEED_GROW) {
+		ret = ext4_ext_grow_indepth(inode, 0);
+		if (ret)
+			goto out;
+		ret = ext4_find_extent(inode, le32_to_cpu(newext->ee_block), ppath, 0);
+		if (ret)
+			goto out;
+		i = depth;
+		path = *ppath;
+		goto again;
+	}
+out:
+	if (ret) {
+		if (path)
+			ext4_ext_drop_refs(path, 0);
+
+		while (--level >= 0 && new_blocks) {
+			if (new_blocks[level])
+				ext4_ext_free_blocks(inode, new_blocks[level], 1, 0);
+		}
+	}
+	if (new_blocks)
+		kfree(new_blocks);
+	return ret;
+}
+
+#if 0
+
+int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext)
+{
+	int i, depth, level, ret = 0;
 	ext4_fsblk_t ptr = 0;
 	struct ext4_ext_path *path = *ppath;
 	struct ext_split_trans *spt = NULL, newblock = {0};
@@ -1031,8 +1110,10 @@ again:
 
 		if (ret && ret != EXT_INODE_HDR_NEED_GROW)
 			goto out;
-		else if (spt && ptr && !ret)
+		else if (spt && ptr && !ret) {
+			/* Prepare for the next iteration after splitting. */
 			spt[i] = newblock;
+		}
 
 		i++;
 	} while (ptr != 0 && i <= depth);
@@ -1086,6 +1167,8 @@ out:
 		kfree(spt);
 	return ret;
 }
+
+#endif
 
 static void ext4_ext_remove_blocks(struct inode *inode, struct ext4_extent *ex,
 				ext4_lblk_t from, ext4_lblk_t to)
