@@ -993,6 +993,8 @@ void print_path(struct ext4_ext_path *path)
 	}
 }
 
+#ifndef CONFIG_EXTENT_KEEP_PATH_VALID
+
 int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext)
 {
 	int i, depth, level, ret = 0;
@@ -1070,7 +1072,7 @@ out:
 	return ret;
 }
 
-#if 0
+#else
 
 int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext)
 {
