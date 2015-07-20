@@ -665,10 +665,13 @@ out:
 		spt->item_offset = ix - EXT_FIRST_INDEX(eh);
 		if (le32_to_cpu(newext->ee_block) >= spt->index)
 			spt->switch_to = 1;
+		else
+			curp->p_idx = ix;
 	
 	} else {
 		spt->index = 0;
 		spt->ptr = 0;
+		curp->p_idx = ix;
 	}
 	return err;
 
@@ -905,10 +908,13 @@ out:
 		spt->item_offset = ex - EXT_FIRST_EXTENT(eh);
 		if (le32_to_cpu(newext->ee_block) >= spt->index)
 			spt->switch_to = 1;
+		else
+			curp->p_ext = ex;
 
 	} else {
 		spt->index = 0;
 		spt->ptr = 0;
+		curp->p_ext = ex;
 	}
 
 	return err;
