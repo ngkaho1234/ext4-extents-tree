@@ -665,13 +665,16 @@ out:
 		spt->item_offset = ix - EXT_FIRST_INDEX(eh);
 		if (le32_to_cpu(newext->ee_block) >= spt->index)
 			spt->switch_to = 1;
-		else
+		else {
 			curp->p_idx = ix;
+			curp->p_block = ext4_idx_pblock(ix);
+		}
 	
 	} else {
 		spt->index = 0;
 		spt->ptr = 0;
 		curp->p_idx = ix;
+		curp->p_block = ext4_idx_pblock(ix);
 	}
 	return err;
 
@@ -790,8 +793,8 @@ static int ext4_ext_insert_leaf(struct inode *inode,
 			       struct ext4_extent *newext,
 			       struct ext_split_trans *spt)
 {
-	struct ext4_extent *ex;
 	struct ext4_ext_path *curp = path + at;
+	struct ext4_extent *ex = curp->p_ext;
 	struct buffer_head *bh = NULL;
 	int len, err, unwritten;
 	struct ext4_extent_header *eh;
@@ -908,13 +911,16 @@ out:
 		spt->item_offset = ex - EXT_FIRST_EXTENT(eh);
 		if (le32_to_cpu(newext->ee_block) >= spt->index)
 			spt->switch_to = 1;
-		else
+		else {
 			curp->p_ext = ex;
+			curp->p_block = ext4_ext_pblock(ex);
+		}
 
 	} else {
 		spt->index = 0;
 		spt->ptr = 0;
 		curp->p_ext = ex;
+		curp->p_block = ext4_ext_pblock(ex);
 	}
 
 	return err;
@@ -993,12 +999,16 @@ void print_path(struct ext4_ext_path *path)
 	int i = path->p_depth;
 	printf("====================\n");
 	while (i >= 0) {
-		printf("depth %d, p_block: %llu\n", i, path->p_block);
+		printf("depth %d, p_block: %llu, p_ext offset: %d, p_idx offset: %d\n", i,
+			path->p_block,
+			(path->p_ext)?(path->p_ext - EXT_FIRST_EXTENT(path->p_hdr)):0,
+			(path->p_idx)?(path->p_idx - EXT_FIRST_INDEX(path->p_hdr)):0);
 		i--;
 		path++;
 	}
 }
 
+#define CONFIG_EXTENT_KEEP_PATH_VALID
 #ifndef CONFIG_EXTENT_KEEP_PATH_VALID
 
 int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext)
@@ -1621,6 +1631,7 @@ int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_fsblk_t iblock,
 				le16_to_cpu(newex.ee_len), 0);
 		goto out2;
 	}
+	print_path(path);
 
 	/* previous routine could use block we allocated */
 	newblock = ext4_ext_pblock(&newex);
