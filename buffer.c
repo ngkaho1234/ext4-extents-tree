@@ -20,15 +20,15 @@
 #include <malloc.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <errno.h>
+#include <time.h>
 #include <assert.h>
 #include <signal.h>
 #include <sys/stat.h>
-#include <sys/mman.h>
 
 static int buffer_free_threshold = 90000;
 static int buffer_dirty_threshold = 9;
 static int buffer_dirty_count = 0;
+static int buffer_writeback_ms = 1000;
 
 /*
  * Pseduo device opening routine.
@@ -139,9 +139,30 @@ static struct buffer_head *buffer_search(struct block_device *bdev,
 					 uint64_t blocknr)
 {
 	struct rb_root *root;
+	struct buffer_head *bh;
 	root = &bdev->bd_bh_root;
-	return __buffer_search(root, blocknr);
+	pthread_mutex_lock(&bdev->bd_bh_root_lock);
+	bh = __buffer_search(root, blocknr);
+	pthread_mutex_unlock(&bdev->bd_bh_root_lock);
+
+	return bh;
 }
+
+static void buffer_insert(struct block_device *bdev,
+			  struct buffer_head *bh)
+{
+	pthread_mutex_lock(&bdev->bd_bh_root_lock);
+	rb_insert(&bdev->bd_bh_root, &bh->b_rb_node, buffer_blocknr_cmp);
+	pthread_mutex_unlock(&bdev->bd_bh_root_lock);
+}
+
+static void __buffer_remove(struct block_device *bdev,
+			  struct buffer_head *bh)
+{
+	rb_erase(&bh->b_rb_node, &bdev->bd_bh_root);
+}
+
+static void *buffer_writeback(void *arg);
 
 struct block_device *bdev_alloc(int fd, int blocksize_bits)
 {
@@ -156,22 +177,61 @@ struct block_device *bdev_alloc(int fd, int blocksize_bits)
 	bdev->bd_fd = fd;
 	bdev->bd_flags = 0;
 	bdev->bd_super = super;
+
 	INIT_LIST_HEAD(&bdev->bd_bh_free);
 	INIT_LIST_HEAD(&bdev->bd_bh_dirty);
+	pthread_mutex_init(&bdev->bd_bh_free_lock, NULL);
+	pthread_mutex_init(&bdev->bd_bh_dirty_lock, NULL);
+	pthread_mutex_init(&bdev->bd_bh_root_lock, NULL);
 
 	super->s_blocksize_bits = blocksize_bits;
 	super->s_blocksize = 1 << super->s_blocksize_bits;
 	super->s_bdev = bdev;
 
+	pipe(bdev->bd_bh_writeback_wakeup_fd);
+	pthread_create(&bdev->bd_bh_writeback_thread, NULL,
+			buffer_writeback, bdev);
+
 	return bdev;
 }
 
+static void bdev_writeback_thread_notify(struct block_device *bdev)
+{
+	char test_byte = 1;
+	write(bdev->bd_bh_writeback_wakeup_fd[1], &test_byte, sizeof(test_byte));
+}
+
+static void bdev_writeback_thread_notify_exit(struct block_device *bdev)
+{
+	char test_byte = -1;
+	write(bdev->bd_bh_writeback_wakeup_fd[1], &test_byte, sizeof(test_byte));
+}
+
+static char bdev_writeback_thread_read_notify(struct block_device *bdev)
+{
+	char test_byte = 0;
+	read(bdev->bd_bh_writeback_wakeup_fd[0], &test_byte, sizeof(test_byte));
+	return test_byte;
+}
+
+static int bdev_is_notify_exiting(char byte)
+{
+	if (byte < 0)
+		return 1;
+	return 0;
+}
+
 static int sync_dirty_buffer(struct buffer_head *bh);
+static void detach_bh_from_freelist(struct buffer_head *bh);
+static void buffer_free(struct buffer_head *bh);
 
 void bdev_free(struct block_device *bdev)
 {
 	void *ret;
 	struct rb_node *node;
+
+	bdev_writeback_thread_notify_exit(bdev);
+	pthread_join(bdev->bd_bh_writeback_thread, NULL);
 	
 	while (!list_empty(&bdev->bd_bh_dirty)) {
 		struct buffer_head *cur;
@@ -179,44 +239,34 @@ void bdev_free(struct block_device *bdev)
 				       struct buffer_head, b_dirty_list);
 		sync_dirty_buffer(cur);
 	}
+
+	pthread_mutex_lock(&bdev->bd_bh_root_lock);
 	while (node = rb_first(&bdev->bd_bh_root)) {
 		struct buffer_head *bh = rb_entry(
 		    node, struct buffer_head, b_rb_node);
+		detach_bh_from_freelist(bh);
+		__buffer_remove(bdev, bh);
 		buffer_free(bh);
 	}
+	pthread_mutex_unlock(&bdev->bd_bh_root_lock);
+
 	if (bdev->bd_nr_free != 0)
 		printf("Warning: ""bdev->bd_nr_free == %d\n", bdev->bd_nr_free);
+
+	close(bdev->bd_bh_writeback_wakeup_fd[0]);
+	close(bdev->bd_bh_writeback_wakeup_fd[1]);
+
+	pthread_mutex_destroy(&bdev->bd_bh_free_lock);
+	pthread_mutex_destroy(&bdev->bd_bh_dirty_lock);
+	pthread_mutex_destroy(&bdev->bd_bh_root_lock);
 
 	free(bdev);
 }
 
-static void try_to_sync_buffers(struct block_device *bdev)
+static void sync_writeback_buffers(struct block_device *bdev)
 {
-	int i, diff;
-	if (buffer_dirty_count > buffer_dirty_threshold) {
-		diff = buffer_dirty_count - buffer_dirty_threshold;
-		for (i = 0;i < diff;i++) {
-			struct buffer_head *cur;
-			cur = list_first_entry(&bdev->bd_bh_dirty,
-					       struct buffer_head, b_dirty_list);
-			sync_dirty_buffer(cur);
-		}
-	}
-}
-
-static void map_underlying_page(struct buffer_head *bh, int prot)
-{
-	struct block_device *bdev = bh->b_bdev;
-	if (!bh->b_page)
-		bh->b_page = mmap(NULL, bh->b_size, prot, MAP_SHARED,
-				bdev->bd_fd,
-				bh->b_blocknr << bdev->bd_super->s_blocksize_bits);
-}
-
-static void unmap_underlying_page(struct buffer_head *bh)
-{
-	if (bh->b_page)
-		munmap(bh->b_page, bh->b_size);
+	if (buffer_dirty_count > buffer_dirty_threshold)
+		bdev_writeback_thread_notify(bdev);
 }
 
 struct buffer_head *buffer_alloc(struct block_device *bdev, uint64_t block,
@@ -238,36 +288,16 @@ struct buffer_head *buffer_alloc(struct block_device *bdev, uint64_t block,
 	pthread_mutex_init(&bh->b_lock, NULL);
 	INIT_LIST_HEAD(&bh->b_freelist);
 	INIT_LIST_HEAD(&bh->b_dirty_list);
-	try_to_sync_buffers(bdev);
+
+	sync_writeback_buffers(bdev);
 
 	return bh;
 }
 
-static void
-attach_bh_to_freelist(struct buffer_head *bh)
-{
-	if (list_empty(&bh->b_freelist)) {
-		list_add(&bh->b_freelist, &bh->b_bdev->bd_bh_free);
-		bh->b_bdev->bd_nr_free++;
-	}
-}
-
-static void
-detach_bh_from_freelist(struct buffer_head *bh)
-{
-	if (!list_empty(&bh->b_freelist)) {
-		list_del_init(&bh->b_freelist);
-		bh->b_bdev->bd_nr_free--;
-	}
-}
-
-void buffer_free(struct buffer_head *bh)
+static void buffer_free(struct buffer_head *bh)
 {
 	struct block_device *bdev;
 	bdev = bh->b_bdev;
-
-	detach_bh_from_freelist(bh);
-	rb_erase(&bh->b_rb_node, &bh->b_bdev->bd_bh_root);
 
 	pthread_mutex_destroy(&bh->b_lock);
 
@@ -275,34 +305,101 @@ void buffer_free(struct buffer_head *bh)
 		printf("Warning: bh: %p b_count != 0, my pid: %d\n", bh, getpid());
 		pthread_kill(pthread_self(), SIGSTOP);
 	}
-	unmap_underlying_page(bh);
 
 	free(bh);
 }
 
-void move_buffer_to_writeback(struct buffer_head *bh)
+static void
+attach_bh_to_freelist(struct buffer_head *bh)
 {
+	struct block_device *bdev = bh->b_bdev;
+	if (list_empty(&bh->b_freelist)) {
+		pthread_mutex_lock(&bdev->bd_bh_free_lock);
+		list_add(&bh->b_freelist, &bh->b_bdev->bd_bh_free);
+		bh->b_bdev->bd_nr_free++;
+		pthread_mutex_unlock(&bdev->bd_bh_free_lock);
+	}
+}
+
+static void
+detach_bh_from_freelist(struct buffer_head *bh)
+{
+	struct block_device *bdev = bh->b_bdev;
+	if (!list_empty(&bh->b_freelist)) {
+		pthread_mutex_lock(&bdev->bd_bh_free_lock);
+		list_del_init(&bh->b_freelist);
+		bh->b_bdev->bd_nr_free--;
+		pthread_mutex_unlock(&bdev->bd_bh_free_lock);
+	}
+}
+
+static void
+remove_first_bh_from_freelist(struct block_device *bdev)
+{
+	struct buffer_head *bh;
+
+	pthread_mutex_lock(&bdev->bd_bh_free_lock);
+	if (list_empty(&bdev->bd_bh_free)) {
+		pthread_mutex_unlock(&bdev->bd_bh_free_lock);
+		return;
+	}
+	bh = list_first_entry(&bdev->bd_bh_free,
+			      struct buffer_head, b_freelist);
+	list_del_init(&bh->b_freelist);
+	bh->b_bdev->bd_nr_free--;
+	pthread_mutex_unlock(&bdev->bd_bh_free_lock);
+
+	pthread_mutex_lock(&bdev->bd_bh_root_lock);
+	__buffer_remove(bdev, bh);
+	pthread_mutex_unlock(&bdev->bd_bh_root_lock);
+	buffer_free(bh);
+}
+
+static void move_buffer_to_writeback(struct buffer_head *bh)
+{
+	struct block_device *bdev = bh->b_bdev;
+	pthread_mutex_lock(&bdev->bd_bh_dirty_lock);
 	if (list_empty(&bh->b_dirty_list)) {
 		list_add(&bh->b_dirty_list, &bh->b_bdev->bd_bh_dirty);
 		buffer_dirty_count++;
 	}
+	pthread_mutex_unlock(&bdev->bd_bh_dirty_lock);
+}
+
+static struct buffer_head *
+remove_first_buffer_from_writeback(struct block_device *bdev)
+{
+	struct buffer_head *bh;
+
+	pthread_mutex_lock(&bdev->bd_bh_dirty_lock);
+	if (list_empty(&bdev->bd_bh_dirty)) {
+		pthread_mutex_unlock(&bdev->bd_bh_dirty_lock);
+		return NULL;
+	}
+	bh = list_first_entry(&bdev->bd_bh_dirty,
+			      struct buffer_head, b_dirty_list);
+	list_del_init(&bh->b_dirty_list);
+	buffer_dirty_count--;
+	pthread_mutex_unlock(&bdev->bd_bh_dirty_lock);
+
+	return bh;
 }
 
 static void remove_buffer_from_writeback(struct buffer_head *bh)
 {
+	struct block_device *bdev = bh->b_bdev;
+	pthread_mutex_lock(&bdev->bd_bh_dirty_lock);
 	if (!list_empty(&bh->b_dirty_list)) {
 		list_del_init(&bh->b_dirty_list);
 		buffer_dirty_count--;
 	}
+	pthread_mutex_unlock(&bdev->bd_bh_dirty_lock);
 }
 
 static void try_to_drop_buffers(struct block_device *bdev)
 {
 	while (bdev->bd_nr_free > buffer_free_threshold) {
-		struct buffer_head *cur;
-		cur = list_first_entry(&bdev->bd_bh_free,
-				       struct buffer_head, b_freelist);
-		buffer_free(cur);
+		remove_first_bh_from_freelist(bdev);
 	}
 }
 
@@ -322,7 +419,6 @@ int submit_bh(int is_write, struct buffer_head *bh)
 	struct block_device *bdev = bh->b_bdev;
 
 	if (is_write == 0) {
-		/*map_underlying_page(bh, PROT_READ|PROT_WRITE);*/
 		/*memcpy(bh->b_data, bh->b_page, bh->b_size);*/
 		ret = device_read(bdev->bd_fd, bh->b_blocknr, 1,
 				   bh->b_size, bh->b_data);
@@ -372,7 +468,8 @@ struct buffer_head *__getblk(struct block_device *bdev, uint64_t block,
 	bh = buffer_alloc(bdev, block, bsize);
 	if (bh == NULL)
 		return NULL;
-	rb_insert(&bdev->bd_bh_root, &bh->b_rb_node, buffer_blocknr_cmp);
+
+	buffer_insert(bdev, bh);
 
 	get_bh(bh);
 	return bh;
@@ -444,6 +541,54 @@ static int sync_dirty_buffer(struct buffer_head *bh)
 		unlock_buffer(bh);
 	}
 	return ret;
+}
+
+static void try_to_sync_buffers(struct block_device *bdev)
+{
+	int i, diff;
+	if (buffer_dirty_count > buffer_dirty_threshold) {
+		diff = buffer_dirty_count - buffer_dirty_threshold;
+		for (i = 0;i < diff;i++) {
+			struct buffer_head *cur;
+			cur = remove_first_buffer_from_writeback(bdev);
+			if (cur)
+				sync_dirty_buffer(cur);
+
+		}
+	}
+}
+
+static void *buffer_writeback(void *arg)
+{
+	struct epoll_event epev;
+	struct block_device *bdev = arg;
+	int epfd = epoll_create(0);
+	if (epfd < 0)
+		return NULL;
+	epoll_ctl(epfd, EPOLL_CTL_ADD, bdev->bd_bh_writeback_wakeup_fd[0], &epev);
+	while (1) {
+		int ret;
+		ret = epoll_wait(epfd, &epev, 1, buffer_writeback_ms);
+		if (ret > 0) {
+			/* We got an nofication. */
+			char command;
+			command = bdev_writeback_thread_read_notify(bdev);
+			if (bdev_is_notify_exiting(command))
+				break;
+			else
+				ret = 0;
+
+		}
+		if (ret == 0) {
+			/* just flush out the dirty data. */
+			try_to_sync_buffers(bdev);
+		}
+		if (ret < 0)
+			break;
+
+	}
+	close(epfd);
+	return NULL;
 }
 
 uint64_t simple_balloc(struct super_block *device, unsigned long blockcnt)
