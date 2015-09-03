@@ -197,24 +197,24 @@ struct block_device *bdev_alloc(int fd, int blocksize_bits)
 
 static void bdev_writeback_thread_notify(struct block_device *bdev)
 {
-	char test_byte = 1;
+	signed char test_byte = 1;
 	write(bdev->bd_bh_writeback_wakeup_fd[1], &test_byte, sizeof(test_byte));
 }
 
 static void bdev_writeback_thread_notify_exit(struct block_device *bdev)
 {
-	char test_byte = -1;
+	signed char test_byte = -1;
 	write(bdev->bd_bh_writeback_wakeup_fd[1], &test_byte, sizeof(test_byte));
 }
 
-static char bdev_writeback_thread_read_notify(struct block_device *bdev)
+static signed char bdev_writeback_thread_read_notify(struct block_device *bdev)
 {
-	char test_byte = 0;
+	signed char test_byte = 0;
 	read(bdev->bd_bh_writeback_wakeup_fd[0], &test_byte, sizeof(test_byte));
 	return test_byte;
 }
 
-static int bdev_is_notify_exiting(char byte)
+static int bdev_is_notify_exiting(signed char byte)
 {
 	if (byte < 0)
 		return 1;
@@ -227,7 +227,6 @@ static void buffer_free(struct buffer_head *bh);
 
 void bdev_free(struct block_device *bdev)
 {
-	void *ret;
 	struct rb_node *node;
 
 	bdev_writeback_thread_notify_exit(bdev);
@@ -296,9 +295,6 @@ struct buffer_head *buffer_alloc(struct block_device *bdev, uint64_t block,
 
 static void buffer_free(struct buffer_head *bh)
 {
-	struct block_device *bdev;
-	bdev = bh->b_bdev;
-
 	pthread_mutex_destroy(&bh->b_lock);
 
 	if (bh->b_count != 0) {
@@ -511,9 +507,9 @@ void brelse(struct buffer_head *bh)
 	if (bh == NULL)
 		return;
 	refcount = bh->b_count;
-	if (bh->b_count > 1)
+	if (refcount > 1)
 		goto out;
-	assert(bh->b_count == 1);
+	assert(refcount == 1);
 
 	if (!buffer_dirty(bh))
 		reclaim_buffer(bh);
@@ -571,7 +567,7 @@ static void *buffer_writeback(void *arg)
 		ret = epoll_wait(epfd, &epev, 1, buffer_writeback_ms);
 		if (ret > 0) {
 			/* We got an nofication. */
-			char command;
+			signed char command;
 			command = bdev_writeback_thread_read_notify(bdev);
 			if (bdev_is_notify_exiting(command))
 				break;
