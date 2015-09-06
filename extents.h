@@ -155,7 +155,7 @@ struct ext4_ext_path
  * Hence, the maximum number of blocks we can have in an *initialized*
  * extent is 2^15 (32768) and in an *uninitialized* extent is 2^15-1 (32767).
  */
-#define EXT_INIT_MAX_LEN (1UL << 15)
+#define EXT_INIT_MAX_LEN (1 << 15)
 #define EXT_UNWRITTEN_MAX_LEN	(EXT_INIT_MAX_LEN - 1)
 
 #define EXT_EXTENT_SIZE sizeof(struct ext4_extent)
@@ -193,40 +193,27 @@ static inline unsigned int ext_depth(struct inode *inode)
 	return ext_inode_hdr(inode)->eh_depth;
 }
 
-static inline void ext4_ext_mark_uninitialized(struct ext4_extent *ext)
-{
-	/* We can not have an uninitialized extent of zero length! */
-	ext->ee_len |= EXT_INIT_MAX_LEN;
-}
-
-static inline int ext4_ext_is_uninitialized(struct ext4_extent *ext)
-{
-	/* Extent with ee_len of 0x8000 is treated as an initialized extent */
-	return (ext->ee_len > EXT_INIT_MAX_LEN);
-}
-
 static inline int ext4_ext_get_actual_len(struct ext4_extent *ext)
 {
-	return (ext->ee_len <= EXT_INIT_MAX_LEN
-		    ? ext->ee_len
-		    : (ext->ee_len - EXT_INIT_MAX_LEN));
+	return (le16_to_cpu(ext->ee_len) <= EXT_INIT_MAX_LEN ?
+		le16_to_cpu(ext->ee_len) :
+		(le16_to_cpu(ext->ee_len) - EXT_INIT_MAX_LEN));
 }
 
 static inline void ext4_ext_mark_initialized(struct ext4_extent *ext)
 {
-	ext->ee_len = ext4_ext_get_actual_len(ext);
+	ext->ee_len = cpu_to_le16(ext4_ext_get_actual_len(ext));
 }
 
 static inline void ext4_ext_mark_unwritten(struct ext4_extent *ext)
 {
-	/* We can not have an unwritten extent of zero length! */
-	ext->ee_len |= EXT_INIT_MAX_LEN;
+	ext->ee_len |= cpu_to_le16(EXT_INIT_MAX_LEN);
 }
 
 static inline int ext4_ext_is_unwritten(struct ext4_extent *ext)
 {
 	/* Extent with ee_len of 0x8000 is treated as an initialized extent */
-	return (ext->ee_len > EXT_INIT_MAX_LEN);
+	return (le16_to_cpu(ext->ee_len) > EXT_INIT_MAX_LEN);
 }
 
 /*

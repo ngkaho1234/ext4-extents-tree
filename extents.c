@@ -1359,8 +1359,6 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 			continue;
 		} else {
 			struct ext4_extent_header *eh;
-			struct ext4_extent_idx *ix;
-			ext4_lblk_t leaf_from, leaf_to;
 			eh = path[i].p_hdr;
 			if (ext4_ext_more_to_rm(path + i, to)) {
 				struct buffer_head *bh;
