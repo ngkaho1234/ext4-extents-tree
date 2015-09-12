@@ -1,13 +1,23 @@
 #ifndef _BUFFER_H
 #define _BUFFER_H
 
-#include <stdint.h>
 #include <stddef.h>
-#include <sys/epoll.h>
 #include <pthread.h>
+#include <semaphore.h>
+#include <errno.h>
+
+#define USE_AIO
+#ifdef USE_AIO
+#include <aio.h>
+#include <signal.h>
+#endif
+
 #include "kerncompat.h"
-#include "rbtree.h"
 #include "list.h"
+#include "rbtree.h"
+
+#define READ 0
+#define WRITE 1
 
 #define might_sleep()
 enum bh_state_bits {
@@ -52,10 +62,15 @@ struct block_device {
 	pthread_mutex_t bd_bh_dirty_lock;
 	struct list_head bd_bh_dirty;
 
+	pthread_mutex_t bd_bh_ioqueue_lock;
+	struct list_head bd_bh_ioqueue;
+
 	pthread_mutex_t bd_bh_root_lock;
 	struct rb_root bd_bh_root;
 
+	pthread_t bd_bh_io_thread;
 	pthread_t bd_bh_writeback_thread;
+	int bd_bh_io_wakeup_fd[2];
 	int bd_bh_writeback_wakeup_fd[2];
 };
 
@@ -89,6 +104,11 @@ struct buffer_head
 	char *b_data;       /* pointer to data within the page */
 	char *b_page;       /* pointer to data within the page */
 
+#ifdef USE_AIO
+	struct aiocb b_aiocb;
+	sem_t b_event;
+#endif
+
 	struct block_device *b_bdev;
 	bh_end_io_t *b_end_io; /* I/O completion */
 	void *b_private;       /* reserved for b_end_io */
@@ -96,6 +116,7 @@ struct buffer_head
 	atomic_t b_count; /* users using this buffer_head */
 	pthread_mutex_t b_lock;
 
+	struct list_head b_io_list;
 	struct list_head b_dirty_list;
 	struct list_head b_freelist;
 	struct rb_node b_rb_node;
@@ -151,6 +172,7 @@ BUFFER_FNS(Meta, meta)
 BUFFER_FNS(Prio, prio)
 BUFFER_FNS(Async_Read, async_read)
 BUFFER_FNS(Async_Write, async_write)
+TAS_BUFFER_FNS(Async_Write, async_write)
 BUFFER_FNS(Delay, delay)
 BUFFER_FNS(Boundary, boundary)
 BUFFER_FNS(Write_EIO, write_io_error)
@@ -177,12 +199,17 @@ static inline void unlock_buffer(struct buffer_head *bh)
 
 static inline void get_bh(struct buffer_head *bh)
 {
-	bh->b_count++;
+	__sync_fetch_and_add(&bh->b_count, 1);
 }
 
 static inline void put_bh(struct buffer_head *bh)
 {
-	bh->b_count--;
+	__sync_fetch_and_sub(&bh->b_count, 1);
+}
+
+static inline int put_bh_and_read(struct buffer_head *bh)
+{
+	return __sync_sub_and_fetch(&bh->b_count, 1);
 }
 
 struct buffer_head *__getblk(struct block_device *, uint64_t, int);
@@ -192,21 +219,17 @@ static inline struct buffer_head *sb_getblk(struct super_block *super,
 	return __getblk(super->s_bdev, block, super->s_blocksize);
 }
 
-int device_open(char *file);
+int device_open(const char *path);
 
 struct block_device *bdev_alloc(int fd, int blocksize_bits);
-
 void bdev_free(struct block_device *bdev);
-
 struct buffer_head *buffer_alloc(struct block_device *bdev, uint64_t block,
 				 int page_size);
+void brelse(struct buffer_head *bh);
+int bh_submit_read(struct buffer_head *bh);
+void wait_on_buffer(struct buffer_head *bh);
 
 uint64_t simple_balloc(struct super_block *device, unsigned long blockcnt);
-
 uint64_t device_size(struct block_device *bdev);
-
-void brelse(struct buffer_head *bh);
-
-int bh_submit_read(struct buffer_head *bh);
 
 #endif

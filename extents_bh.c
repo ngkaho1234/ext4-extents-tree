@@ -11,6 +11,7 @@ struct buffer_head *fs_bread(struct super_block *sb, ext4_fsblk_t block, int *re
 	struct buffer_head *bh;
 	bh = sb_getblk(sb, block);
 	err = bh_submit_read(bh);
+	wait_on_buffer(bh);
 out:
 	if (ret)
 		*ret = err;
