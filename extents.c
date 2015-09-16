@@ -387,6 +387,7 @@ int ext4_find_extent(struct inode *inode, ext4_lblk_t block,
 {
 	struct ext4_extent_header *eh;
 	struct buffer_head *bh;
+	ext4_fsblk_t buf_block = 0;
 	struct ext4_ext_path *path = *orig_path;
 	int depth, i, ppos = 0;
 	int ret;
@@ -411,6 +412,7 @@ int ext4_find_extent(struct inode *inode, ext4_lblk_t block,
 	}
 	path[0].p_hdr = eh;
 	path[0].p_bh = NULL;
+	path[0].p_buf_block = 0;
 
 	i = depth;
 	/* walk through the tree */
@@ -419,22 +421,28 @@ int ext4_find_extent(struct inode *inode, ext4_lblk_t block,
 		path[ppos].p_block = ext4_idx_pblock(path[ppos].p_idx);
 		path[ppos].p_depth = i;
 		path[ppos].p_ext = NULL;
+		buf_block = path[ppos].p_block;
 
-		bh = read_extent_tree_block(inode, path[ppos].p_block, --i,
-					    &ret, flags);
-		if (ret) {
-			goto err;
-		}
-
-		eh = ext_block_hdr(bh);
+		i--;
 		ppos++;
-		if (ppos > depth) {
-			fs_brelse(bh);
-			ret = -EIO;
-			goto err;
+		if (path[ppos].p_buf_block != buf_block ||
+		    !path[ppos].p_bh) {
+			bh = read_extent_tree_block(inode, buf_block, i,
+						    &ret, flags);
+			if (ret) {
+				goto err;
+			}
+			if (ppos > depth) {
+				fs_brelse(bh);
+				ret = -EIO;
+				goto err;
+			}
+
+			eh = ext_block_hdr(bh);
+			path[ppos].p_bh = bh;
+			path[ppos].p_hdr = eh;
+			path[ppos].p_buf_block = buf_block;
 		}
-		path[ppos].p_bh = bh;
-		path[ppos].p_hdr = eh;
 	}
 
 	path[ppos].p_depth = i;
@@ -1166,6 +1174,7 @@ out:
 				ext4_ext_drop_refs(path + i, 1);
 				path[i].p_bh = spt[level].bh;
 				path[i].p_hdr = eh = ext_block_hdr(spt[level].bh);
+				path[i].p_buf_block = path[i-1].p_block;
 				if (level) {
 					path[i].p_idx = EXT_FIRST_INDEX(eh)
 						+ spt[level].item_offset;
@@ -1372,6 +1381,7 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 					goto out;
 
 				path[i].p_block = ext4_idx_pblock(path[i].p_idx);
+				path[i+1].p_buf_block = path[i].p_block;
 				path[i+1].p_bh = bh;
 				path[i+1].p_hdr = ext_block_hdr(bh);
 				path[i+1].p_depth = depth - i - 1;
@@ -1396,6 +1406,9 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 	}
 
 	/* TODO: flexible tree reduction should be here */
+	if (path->p_depth) {
+		int nr_entries = 0;
+	}
 	if (path->p_hdr->eh_entries == 0) {
 		/*
 		 * truncate to zero freed all the tree,
