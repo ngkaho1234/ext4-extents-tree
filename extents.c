@@ -1023,6 +1023,30 @@ void print_path(struct ext4_ext_path *path)
 	}
 }
 
+static inline int
+ext4_ext_replace_path(struct ext4_ext_path *path,
+		      struct ext_split_trans *spt,
+		      int depth,
+		      int level)
+{
+	int i = depth - level;
+	struct ext4_extent_header *eh;
+	eh = ext_block_hdr(spt[level].bh);
+
+	ext4_ext_drop_refs(path + i, 1);
+	path[i].p_bh = spt[level].bh;
+	path[i].p_hdr = eh;
+	if (level) {
+		path[i].p_idx = EXT_FIRST_INDEX(eh)
+			+ spt[level].item_offset;
+		path[i].p_block = ext4_idx_pblock(path[i].p_idx);
+	} else {
+		path[i].p_ext = EXT_FIRST_EXTENT(eh)
+			+ spt[level].item_offset;
+		path[i].p_block = ext4_ext_pblock(path[i].p_ext);
+	}
+}
+
 int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext)
 {
 	int i, depth, level, ret = 0;
@@ -1094,22 +1118,12 @@ out:
 	} else {
 		while (--level >= 0 && spt) {
 			struct ext4_extent_header *eh;
-			i = depth - level;
-			if (spt[level].switch_to) {
-				ext4_ext_drop_refs(path + i, 1);
-				path[i].p_bh = spt[level].bh;
-				path[i].p_hdr = eh = ext_block_hdr(spt[level].bh);
-				if (level) {
-					path[i].p_idx = EXT_FIRST_INDEX(eh)
-						+ spt[level].item_offset;
-					path[i].p_block = ext4_idx_pblock(path[i].p_idx);
-				} else {
-					path[i].p_ext = EXT_FIRST_EXTENT(eh)
-						+ spt[level].item_offset;
-					path[i].p_block = ext4_ext_pblock(path[i].p_ext);
-				}
-
-			} else if (spt[level].bh)
+			if (spt[level].switch_to)
+				ext4_ext_replace_path(path,
+						      spt,
+						      depth,
+						      level);
+			else if (spt[level].bh)
 				fs_brelse(spt[level].bh);
 
 		}
