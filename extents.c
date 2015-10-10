@@ -387,6 +387,8 @@ static ext4_fsblk_t ext4_bh_block(struct buffer_head *bh)
 	return bh->b_blocknr;
 }
 
+#define EXT4_EXT_PATH_INC_DEPTH 1
+
 int ext4_find_extent(struct inode *inode, ext4_lblk_t block,
 		 struct ext4_ext_path **orig_path, int flags)
 {
@@ -408,12 +410,14 @@ int ext4_find_extent(struct inode *inode, ext4_lblk_t block,
 		}
 	}
 	if (!path) {
+		int path_depth = depth + EXT4_EXT_PATH_INC_DEPTH;
 		/* account possible depth increase */
-		path = kzalloc(sizeof(struct ext4_ext_path) * (depth + 2),
+		path = kzalloc(sizeof(struct ext4_ext_path) *
+					(path_depth + 1),
 				GFP_NOFS);
 		if (!path)
 			return -ENOMEM;
-		path[0].p_maxdepth = depth + 1;
+		path[0].p_maxdepth = path_depth;
 	}
 	path[0].p_hdr = eh;
 	path[0].p_bh = NULL;
