@@ -560,24 +560,19 @@ cleanup:
 	return ret;
 }
 
-static ext4_lblk_t ext4_ext_block_index(struct buffer_head *bh)
+static ext4_lblk_t ext4_ext_block_index(struct ext4_extent_header *eh)
 {
-	struct ext4_extent_header *neh;
-	neh = ext_block_hdr(bh);
-
-	if (neh->eh_depth)
-		return le32_to_cpu(EXT_FIRST_INDEX(neh)->ei_block);
-	return le32_to_cpu(EXT_FIRST_EXTENT(neh)->ee_block);
+	if (eh->eh_depth)
+		return le32_to_cpu(EXT_FIRST_INDEX(eh)->ei_block);
+	return le32_to_cpu(EXT_FIRST_EXTENT(eh)->ee_block);
 }
 
 #define EXT_INODE_HDR_NEED_GROW 0x1
 
 struct ext_split_trans {
-	ext4_lblk_t	   index;
-	ext4_fsblk_t	   ptr;
-	int		   item_offset; /* If switch_to is false, this field should not be concerned. */
-	int		   switch_to;
-	struct buffer_head *bh;
+	ext4_fsblk_t	     ptr;
+	struct ext4_ext_path path;
+	int		     switch_to;
 };
 
 static int ext4_ext_insert_index(struct inode *inode,
@@ -672,14 +667,19 @@ out:
 		if (bh)
 			fs_brelse(bh);
 
-		spt->index = 0;
 		spt->ptr = 0;
 	} else if (bh) {
 		/* If we got a sibling leaf. */
-		spt->index = ext4_ext_block_index(bh);
 		fs_mark_buffer_dirty(bh);
-		spt->bh = bh;
-		spt->item_offset = ix - EXT_FIRST_INDEX(eh);
+
+		spt->path.p_block = ext4_idx_pblock(ix);
+		spt->path.p_depth = cpu_to_le16(eh->eh_depth);
+		spt->path.p_maxdepth = 0;
+		spt->path.p_ext = NULL;
+		spt->path.p_idx = ix;
+		spt->path.p_hdr = eh;
+		spt->path.p_bh = bh;
+
 		if (switch_to)
 			spt->switch_to = 1;
 		else {
@@ -688,7 +688,6 @@ out:
 		}
 	
 	} else {
-		spt->index = 0;
 		spt->ptr = 0;
 		curp->p_idx = ix;
 		curp->p_block = ext4_idx_pblock(ix);
@@ -920,14 +919,19 @@ out:
 		if (bh)
 			fs_brelse(bh);
 
-		spt->index = 0;
 		spt->ptr = 0;
 	} else if (bh) {
 		/* If we got a sibling leaf. */
-		spt->index = ext4_ext_block_index(bh);
 		fs_mark_buffer_dirty(bh);
-		spt->bh = bh;
-		spt->item_offset = ex - EXT_FIRST_EXTENT(eh);
+
+		spt->path.p_block = ext4_ext_pblock(ex);
+		spt->path.p_depth = cpu_to_le16(eh->eh_depth);
+		spt->path.p_maxdepth = 0;
+		spt->path.p_ext = ex;
+		spt->path.p_idx = NULL;
+		spt->path.p_hdr = eh;
+		spt->path.p_bh = bh;
+
 		if (switch_to)
 			spt->switch_to = 1;
 		else {
@@ -936,7 +940,6 @@ out:
 		}
 
 	} else {
-		spt->index = 0;
 		spt->ptr = 0;
 		curp->p_ext = ex;
 		curp->p_block = ext4_ext_pblock(ex);
@@ -1034,21 +1037,9 @@ ext4_ext_replace_path(struct ext4_ext_path *path,
 		      int level)
 {
 	int i = depth - level;
-	struct ext4_extent_header *eh;
-	eh = ext_block_hdr(spt[level].bh);
 
 	ext4_ext_drop_refs(path + i, 1);
-	path[i].p_bh = spt[level].bh;
-	path[i].p_hdr = eh;
-	if (level) {
-		path[i].p_idx = EXT_FIRST_INDEX(eh)
-			+ spt[level].item_offset;
-		path[i].p_block = ext4_idx_pblock(path[i].p_idx);
-	} else {
-		path[i].p_ext = EXT_FIRST_EXTENT(eh)
-			+ spt[level].item_offset;
-		path[i].p_block = ext4_ext_pblock(path[i].p_ext);
-	}
+	path[i] = spt->path;
 }
 
 int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext)
@@ -1081,7 +1072,7 @@ again:
 					     newext, &newblock);
 		} else {
 			ret = ext4_ext_insert_index(inode, path, depth - i,
-					     newext, spt[i-1].index,
+					     newext, ext4_ext_block_index(spt[i-1].path.p_hdr),
 					     spt[i-1].ptr,
 					     &newblock);
 		}
@@ -1116,7 +1107,7 @@ out:
 		while (--level >= 0 && spt) {
 			if (spt[level].ptr) {
 				ext4_ext_free_blocks(inode, spt[level].ptr, 1, 0);
-				fs_brelse(spt[level].bh);
+				ext4_ext_drop_refs(&spt[level].path, 1);
 			}
 		}
 	} else {
@@ -1127,8 +1118,8 @@ out:
 						      spt,
 						      depth,
 						      level);
-			else if (spt[level].bh)
-				fs_brelse(spt[level].bh);
+			else if (spt[level].ptr)
+				ext4_ext_drop_refs(&spt[level].path, 1);
 
 		}
 	}
