@@ -13,6 +13,7 @@
 
 #define EXT4_EXT_DATA_VALID1	0x8  /* first half contains valid data */
 #define EXT4_EXT_DATA_VALID2	0x10 /* second half contains valid data */
+#define EXT4_EXT_NO_COMBINE	0x20 /* do not combine two extents */
 
 /*#ifdef _EXTENTS_TEST*/
 #if 1
@@ -260,7 +261,7 @@ static int ext4_ext_check(struct inode *inode,
 	const char *error_msg;
 	int max = 0;
 
-	if (eh->eh_magic != EXT4_EXT_MAGIC) {
+	if (eh->eh_magic != cpu_to_le16(EXT4_EXT_MAGIC)) {
 		error_msg = "invalid magic";
 		goto corrupted;
 	}
@@ -810,7 +811,8 @@ static int ext4_ext_insert_leaf(struct inode *inode,
 			       struct ext4_ext_path *path,
 			       int at,
 			       struct ext4_extent *newext,
-			       struct ext_split_trans *spt)
+			       struct ext_split_trans *spt,
+			       int flags)
 {
 	struct ext4_ext_path *curp = path + at;
 	struct ext4_extent *ex = curp->p_ext;
@@ -821,27 +823,29 @@ static int ext4_ext_insert_leaf(struct inode *inode,
 	if (curp->p_ext && le32_to_cpu(newext->ee_block) == le32_to_cpu(curp->p_ext->ee_block))
 		return -EIO;
 
-	if (curp->p_ext && ext4_ext_can_append(curp->p_ext, newext)) {
-		unwritten = ext4_ext_is_unwritten(curp->p_ext);
-		curp->p_ext->ee_len = cpu_to_le16(ext4_ext_get_actual_len(curp->p_ext)
-			+ ext4_ext_get_actual_len(newext));
-		if (unwritten)
-			ext4_ext_mark_unwritten(curp->p_ext);
-		err = __ext4_ext_dirty(inode, curp);
-		goto out;
+	if (!(flags & EXT4_EXT_NO_COMBINE)) {
+		if (curp->p_ext && ext4_ext_can_append(curp->p_ext, newext)) {
+			unwritten = ext4_ext_is_unwritten(curp->p_ext);
+			curp->p_ext->ee_len = cpu_to_le16(ext4_ext_get_actual_len(curp->p_ext)
+				+ ext4_ext_get_actual_len(newext));
+			if (unwritten)
+				ext4_ext_mark_unwritten(curp->p_ext);
+			err = __ext4_ext_dirty(inode, curp);
+			goto out;
 
-	}
+		}
 
-	if (curp->p_ext && ext4_ext_can_prepend(curp->p_ext, newext)) {
-		unwritten = ext4_ext_is_unwritten(curp->p_ext);
-		curp->p_ext->ee_block = newext->ee_block;
-		curp->p_ext->ee_len = cpu_to_le16(ext4_ext_get_actual_len(curp->p_ext)
-			+ ext4_ext_get_actual_len(newext));
-		if (unwritten)
-			ext4_ext_mark_unwritten(curp->p_ext);
-		err = __ext4_ext_dirty(inode, curp);
-		goto out;
+		if (curp->p_ext && ext4_ext_can_prepend(curp->p_ext, newext)) {
+			unwritten = ext4_ext_is_unwritten(curp->p_ext);
+			curp->p_ext->ee_block = newext->ee_block;
+			curp->p_ext->ee_len = cpu_to_le16(ext4_ext_get_actual_len(curp->p_ext)
+				+ ext4_ext_get_actual_len(newext));
+			if (unwritten)
+				ext4_ext_mark_unwritten(curp->p_ext);
+			err = __ext4_ext_dirty(inode, curp);
+			goto out;
 
+		}
 	}
 
 	if (le16_to_cpu(curp->p_hdr->eh_entries)
@@ -1048,7 +1052,7 @@ ext4_ext_replace_path(struct ext4_ext_path *path,
 	path[i] = spt->path;
 }
 
-int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext)
+int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext, int flags)
 {
 	int i, depth, level, ret = 0;
 	ext4_fsblk_t ptr = 0;
@@ -1075,7 +1079,8 @@ again:
 	do {
 		if (!i) {
 			ret = ext4_ext_insert_leaf(inode, path, depth - i,
-					     newext, &newblock);
+					     newext, &newblock,
+					     flags);
 		} else {
 			ret = ext4_ext_insert_index(inode, path, depth - i,
 					     newext, ext4_ext_block_index(spt[i-1].path.p_hdr),
@@ -1409,7 +1414,8 @@ int ext4_ext_split_extent_at(struct inode *inode,
 	ext4_ext_store_pblock(&newex, newblock);
 	if (split_flag & EXT4_EXT_MARK_UNWRIT2)
 		ext4_ext_mark_unwritten(&newex);
-	err = ext4_ext_insert_extent(inode, ppath, &newex);
+	err = ext4_ext_insert_extent(inode, ppath, &newex,
+				EXT4_EXT_NO_COMBINE);
 	if (err)
 		goto restore_extent_len;
 
@@ -1571,7 +1577,7 @@ int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_fsblk_t iblock,
 	newex.ee_block = cpu_to_le32(iblock);
 	ext4_ext_store_pblock(&newex, newblock);
 	newex.ee_len = cpu_to_le16(allocated);
-	err = ext4_ext_insert_extent(inode, &path, &newex);
+	err = ext4_ext_insert_extent(inode, &path, &newex, 0);
 	if (err) {
 		/* free data blocks we just allocated */
 		ext4_ext_free_blocks(inode, ext4_ext_pblock(&newex),
