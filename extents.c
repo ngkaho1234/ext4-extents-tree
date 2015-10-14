@@ -583,7 +583,6 @@ static int ext4_ext_insert_index(struct inode *inode,
 			       ext4_fsblk_t insert_block,
 			       struct ext_split_trans *spt)
 {
-	int switch_to = 0;
 	struct ext4_extent_idx *ix;
 	struct ext4_ext_path *curp = path + at;
 	struct buffer_head *bh = NULL;
@@ -613,7 +612,6 @@ static int ext4_ext_insert_index(struct inode *inode,
 				} else {
 					eh = neh;
 					ix = EXT_FIRST_INDEX(eh);
-					switch_to = 1;
 				}
 			} else {
 				eh = curp->p_hdr;
@@ -680,7 +678,12 @@ out:
 		spt->path.p_hdr = eh;
 		spt->path.p_bh = bh;
 
-		if (switch_to)
+		/*
+		 * If newext->ee_block can be included into the
+		 * right sub-tree.
+		 */
+		if (le32_to_cpu(newext->ee_block) >=
+			ext4_ext_block_index(ext_block_hdr(bh)))
 			spt->switch_to = 1;
 		else {
 			curp->p_idx = ix;
@@ -809,7 +812,6 @@ static int ext4_ext_insert_leaf(struct inode *inode,
 			       struct ext4_extent *newext,
 			       struct ext_split_trans *spt)
 {
-	int switch_to = 0;
 	struct ext4_ext_path *curp = path + at;
 	struct ext4_extent *ex = curp->p_ext;
 	struct buffer_head *bh = NULL;
@@ -861,7 +863,6 @@ static int ext4_ext_insert_leaf(struct inode *inode,
 				} else {
 					eh = neh;
 					ex = EXT_FIRST_EXTENT(eh);
-					switch_to = 1;
 				}
 			} else {
 				eh = curp->p_hdr;
@@ -932,7 +933,12 @@ out:
 		spt->path.p_hdr = eh;
 		spt->path.p_bh = bh;
 
-		if (switch_to)
+		/*
+		 * If newext->ee_block can be included into the
+		 * right sub-tree.
+		 */
+		if (le32_to_cpu(newext->ee_block) >=
+			ext4_ext_block_index(ext_block_hdr(bh)))
 			spt->switch_to = 1;
 		else {
 			curp->p_ext = ex;
