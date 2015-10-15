@@ -1083,7 +1083,8 @@ again:
 					     flags);
 		} else {
 			ret = ext4_ext_insert_index(inode, path, depth - i,
-					     newext, ext4_ext_block_index(spt[i-1].path.p_hdr),
+					     newext,
+					     ext4_ext_block_index(ext_block_hdr(spt[i-1].path.p_bh)),
 					     spt[i-1].ptr,
 					     &newblock);
 		}
