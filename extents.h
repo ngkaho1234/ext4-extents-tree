@@ -188,12 +188,12 @@ static inline struct ext4_extent_header *ext_block_hdr(struct buffer_head *bh)
 	return (struct ext4_extent_header *)bh->b_data;
 }
 
-static inline unsigned int ext_depth(struct inode *inode)
+static inline uint16_t ext_depth(struct inode *inode)
 {
-	return ext_inode_hdr(inode)->eh_depth;
+	return le16_to_cpu(ext_inode_hdr(inode)->eh_depth);
 }
 
-static inline int ext4_ext_get_actual_len(struct ext4_extent *ext)
+static inline uint16_t ext4_ext_get_actual_len(struct ext4_extent *ext)
 {
 	return (le16_to_cpu(ext->ee_len) <= EXT_INIT_MAX_LEN ?
 		le16_to_cpu(ext->ee_len) :

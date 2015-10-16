@@ -254,7 +254,7 @@ static void ext4_extent_block_csum_set(struct inode *inode,
  * is correct or not.
  */
 static int ext4_ext_check(struct inode *inode,
-			    struct ext4_extent_header *eh, int depth,
+			    struct ext4_extent_header *eh, uint16_t  depth,
 			    ext4_fsblk_t pblk)
 {
 	struct ext4_extent_tail *tail;
@@ -1196,7 +1196,8 @@ static int ext4_ext_remove_leaf(struct inode *inode, struct ext4_ext_path *path,
 	struct ext4_extent *ex = path[depth].p_ext;
 	struct ext4_extent *start_ex, *ex2 = NULL;
 	struct ext4_extent_header *eh = path[depth].p_hdr;
-	int len, err = 0, new_entries;
+	int len, err = 0;
+	uint16_t new_entries;
 
 	start_ex = ex;
 	new_entries = le16_to_cpu(eh->eh_entries);
@@ -1542,7 +1543,7 @@ int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_fsblk_t iblock,
 	if ((ex = path[depth].p_ext)) {
 	        ext4_lblk_t ee_block = le32_to_cpu(ex->ee_block);
 		ext4_fsblk_t ee_start = ext4_ext_pblock(ex);
-		unsigned int ee_len  = ext4_ext_get_actual_len(ex);
+		uint16_t ee_len  = ext4_ext_get_actual_len(ex);
 		/* if found exent covers block, simple return it */
 	        if (in_range(iblock, ee_block, ee_len)) {
 			newblock = iblock - ee_block + ee_start;
