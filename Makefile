@@ -1,6 +1,5 @@
 CC=gcc
-CFLAG=-g -fPIC -pie -I. -lpthread -lrt
-#
+CFLAG=-g -fPIC -pie -I. -lpthread -lrt -Wall
 
 COMMON_SRC=extents_bh.c buffer.c rbtree.c ext4_crc32.c db_bitmap.c db.c
 EXTENTS= $(COMMON_SRC) extents.c
