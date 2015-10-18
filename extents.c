@@ -258,8 +258,7 @@ static int ext4_ext_check(struct inode *inode,
 			    ext4_fsblk_t pblk)
 {
 	struct ext4_extent_tail *tail;
-	const char *error_msg;
-	int max = 0;
+	const char *error_msg = NULL;
 
 	if (eh->eh_magic != cpu_to_le16(EXT4_EXT_MAGIC)) {
 		error_msg = "invalid magic";
@@ -286,6 +285,7 @@ static int ext4_ext_check(struct inode *inode,
 	return 0;
 
 corrupted:
+	ext_debug("ext4_check_header: %s\n", error_msg);
 	return -EIO;
 }
 
@@ -476,7 +476,7 @@ err:
 	return ret;
 }
 
-static int ext4_ext_init_header(struct inode *inode, struct ext4_extent_header *eh, int depth)
+static void ext4_ext_init_header(struct inode *inode, struct ext4_extent_header *eh, int depth)
 {
 	eh->eh_entries = 0;
 	eh->eh_max = cpu_to_le16(ext4_ext_max_entries(inode, depth, 0));
@@ -1040,7 +1040,7 @@ void print_path(struct ext4_ext_path *path)
 	}
 }
 
-static inline int
+static inline void
 ext4_ext_replace_path(struct ext4_ext_path *path,
 		      struct ext_split_trans *spt,
 		      int depth,
@@ -1124,7 +1124,6 @@ out:
 		}
 	} else {
 		while (--level >= 0 && spt) {
-			struct ext4_extent_header *eh;
 			if (spt[level].switch_to)
 				ext4_ext_replace_path(path,
 						      spt,
@@ -1148,7 +1147,7 @@ static void ext4_ext_remove_blocks(struct inode *inode, struct ext4_extent *ex,
 	ext4_fsblk_t start;
 	num = from - le32_to_cpu(ex->ee_block);
 	start = ext4_ext_pblock(ex) + num;
-	ext_debug("Freeing %lu at %llu, %d\n", from, start, len);
+	ext_debug("Freeing %u at %llu, %d\n", from, start, len);
 	ext4_ext_free_blocks(inode, start, len, 0);
 }
 
@@ -1171,7 +1170,7 @@ static int ext4_ext_remove_idx(struct inode *inode, struct ext4_ext_path *path, 
 	if (err)
 		return err;
 
-	ext_debug("IDX: Freeing %lu at %llu, %d\n",
+	ext_debug("IDX: Freeing %u at %llu, %d\n",
 		le32_to_cpu(path[i].p_idx->ei_block), leaf, 1);
 	ext4_ext_free_blocks(inode, leaf, 1, 0);
 
@@ -1349,9 +1348,6 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 	}
 
 	/* TODO: flexible tree reduction should be here */
-	if (path->p_depth) {
-		int nr_entries = 0;
-	}
 	if (path->p_hdr->eh_entries == 0) {
 		/*
 		 * truncate to zero freed all the tree,
@@ -1514,6 +1510,26 @@ ext4_ext_next_allocated_block(struct ext4_ext_path *path)
 	return EXT_MAX_BLOCKS;
 }
 
+static int ext4_ext_zero_unwritten_range(struct inode *inode,
+					 ext4_fsblk_t block,
+					 unsigned long blocks_count)
+{
+	int err = 0;
+	unsigned long i;
+	int blocksize = inode->i_sb->s_blocksize;
+	for (i = 0; i < blocks_count; i++) {
+		struct buffer_head *bh;
+		bh = fs_bwrite(inode->i_sb, block, &err);
+		if (!bh)
+			break;
+
+		memset(bh->b_data, 0, blocksize);
+		fs_mark_buffer_dirty(bh);
+		fs_brelse(bh);
+	}
+	return err;
+}
+
 int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_fsblk_t iblock,
 			unsigned long max_blocks, struct buffer_head *bh_result,
 			int create, int extend_disksize)
@@ -1546,7 +1562,34 @@ int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_fsblk_t iblock,
 		uint16_t ee_len  = ext4_ext_get_actual_len(ex);
 		/* if found exent covers block, simple return it */
 	        if (in_range(iblock, ee_block, ee_len)) {
-			newblock = iblock - ee_block + ee_start;
+			/* number of remain blocks in the extent */
+			allocated = ee_len - (iblock - ee_block);
+
+			if (ext4_ext_is_unwritten(ex)) {
+				if (create) {
+					unsigned long zero_range;
+					zero_range = allocated;
+					if (zero_range > max_blocks)
+						zero_range = max_blocks;
+
+					newblock = iblock - ee_block + ee_start;
+					err = ext4_ext_zero_unwritten_range(
+					    inode, newblock, zero_range);
+					if (err)
+						goto out2;
+
+					err = ext4_ext_convert_to_initialized(
+					    inode, &path, iblock,
+					    zero_range, 0);
+					if (err)
+						goto out2;
+
+				} else {
+					newblock = 0;
+				}
+			} else {
+				newblock = iblock - ee_block + ee_start;
+			}
 			/* number of remain blocks in the extent */
 			allocated = ee_len - (iblock - ee_block);
 			goto out;

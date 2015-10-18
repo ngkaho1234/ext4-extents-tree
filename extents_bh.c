@@ -12,7 +12,6 @@ struct buffer_head *fs_bread(struct super_block *sb, ext4_fsblk_t block, int *re
 	bh = sb_getblk(sb, block);
 	err = bh_submit_read(bh);
 	wait_on_buffer(bh);
-out:
 	if (ret)
 		*ret = err;
 	if (bh)
@@ -26,7 +25,6 @@ struct buffer_head *fs_bwrite(struct super_block *sb, ext4_fsblk_t block, int *r
 	int err = 0;
 	struct buffer_head *bh;
 	bh = sb_getblk(sb, block);
-out:
 	if (ret)
 		*ret = err;
 	if (bh)
