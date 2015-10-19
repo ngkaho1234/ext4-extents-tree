@@ -16,6 +16,7 @@
 #define EXT4_EXT_NO_COMBINE	0x20 /* do not combine two extents */
 
 /*#ifdef _EXTENTS_TEST*/
+#define AGGRESSIVE_TEST
 #if 1
 static inline int ext4_mark_inode_dirty(struct inode *inode)
 {
@@ -1046,10 +1047,8 @@ ext4_ext_replace_path(struct ext4_ext_path *path,
 		      int depth,
 		      int level)
 {
-	int i = depth - level;
-
-	ext4_ext_drop_refs(path + i, 1);
-	path[i] = spt->path;
+	ext4_ext_drop_refs(path + level, 1);
+	path[level] = spt->path;
 }
 
 int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext, int flags)
@@ -1252,6 +1251,8 @@ static int ext4_ext_remove_leaf(struct inode *inode, struct ext4_ext_path *path,
 	 * remove it from index block above */
 	if (err == 0 && eh->eh_entries == 0 && path[depth].p_bh != NULL)
 		err = ext4_ext_remove_idx(inode, path, depth - 1);
+	else
+		path[depth - 1].p_idx++;
 
 	return err;
 }
@@ -1262,7 +1263,7 @@ ext4_ext_more_to_rm(struct ext4_ext_path *path, ext4_lblk_t to)
 	if (!le16_to_cpu(path->p_hdr->eh_entries))
 		return 0;
 
-	if (path->p_idx >= EXT_LAST_INDEX(path->p_hdr))
+	if (path->p_idx > EXT_LAST_INDEX(path->p_hdr))
 		return 0;
 
 	if (le32_to_cpu(path->p_idx->ei_block) > to)
