@@ -1208,17 +1208,18 @@ static int ext4_ext_remove_leaf(struct inode *inode, struct ext4_ext_path *path,
 		new_start = start = le32_to_cpu(ex->ee_block);
 		len = ext4_ext_get_actual_len(ex);
 		if (start < from) {
-			start = from;
 			len -= from - start;
 			new_len = from - start;
+			start = from;
 			start_ex++;
 		}
-		if (start + len - 1 > to) {
-			len -= start + len - 1 - to;
-			new_len = start + len - 1 - to;
-			new_start += to + 1;
-			ex2 = ex;
-		}
+		/* TODO: More complicated truncate operation. */
+		/*if (start + len - 1 > to) {*/
+			/*len -= start + len - 1 - to;*/
+			/*new_len = start + len - 1 - to;*/
+			/*new_start = to + 1;*/
+			/*ex2 = ex;*/
+		/*}*/
 
 		ext4_ext_remove_blocks(inode, ex, start, start + len - 1);
 		ex->ee_block = cpu_to_le32(new_start);
@@ -1261,7 +1262,7 @@ ext4_ext_more_to_rm(struct ext4_ext_path *path, ext4_lblk_t to)
 	if (!le16_to_cpu(path->p_hdr->eh_entries))
 		return 0;
 
-	if (path->p_idx > EXT_LAST_INDEX(path->p_hdr))
+	if (path->p_idx >= EXT_LAST_INDEX(path->p_hdr))
 		return 0;
 
 	if (le32_to_cpu(path->p_idx->ei_block) > to)
