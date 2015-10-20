@@ -1047,8 +1047,9 @@ ext4_ext_replace_path(struct ext4_ext_path *path,
 		      int depth,
 		      int level)
 {
-	ext4_ext_drop_refs(path + level, 1);
-	path[level] = spt->path;
+	int i = depth - level;
+	ext4_ext_drop_refs(path + i, 1);
+	path[i] = spt[level].path;
 }
 
 int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext, int flags)
@@ -1252,7 +1253,8 @@ static int ext4_ext_remove_leaf(struct inode *inode, struct ext4_ext_path *path,
 	if (err == 0 && eh->eh_entries == 0 && path[depth].p_bh != NULL)
 		err = ext4_ext_remove_idx(inode, path, depth - 1);
 	else
-		path[depth - 1].p_idx++;
+		if (depth > 0)
+			path[depth - 1].p_idx++;
 
 	return err;
 }
@@ -1336,10 +1338,15 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 
 				i++;
 			} else {
-				if (!le16_to_cpu(eh->eh_entries) && i > 0) {
-					
-					ret = ext4_ext_remove_idx(inode, path, i - 1);
+				if (i > 0) {
+					if (!le16_to_cpu(eh->eh_entries)) {
+						
+						ret = ext4_ext_remove_idx(inode, path, i - 1);
+					} else
+						path[i - 1].p_idx++;
+
 				}
+
 				if (i) {
 					fs_brelse(path[i].p_bh);
 					path[i].p_bh = NULL;
