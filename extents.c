@@ -1204,22 +1204,25 @@ static int ext4_ext_remove_leaf(struct inode *inode, struct ext4_ext_path *path,
 		&& le32_to_cpu(ex->ee_block) <= to) {
 		int new_len = 0;
 		int unwritten;
-		ext4_fsblk_t start, new_start;
+		ext4_lblk_t start, new_start;
+		ext4_fsblk_t newblock;
 		new_start = start = le32_to_cpu(ex->ee_block);
 		len = ext4_ext_get_actual_len(ex);
+		newblock = ext4_ext_pblock(ex);
 		if (start < from) {
 			len -= from - start;
 			new_len = from - start;
 			start = from;
 			start_ex++;
+		} else {
+			if (start + len - 1 > to) {
+				len -= start + len - 1 - to;
+				new_len = start + len - 1 - to;
+				new_start = to + 1;
+				newblock += to + 1 - start;
+				ex2 = ex;
+			}
 		}
-		/* TODO: More complicated truncate operation. */
-		/*if (start + len - 1 > to) {*/
-			/*len -= start + len - 1 - to;*/
-			/*new_len = start + len - 1 - to;*/
-			/*new_start = to + 1;*/
-			/*ex2 = ex;*/
-		/*}*/
 
 		ext4_ext_remove_blocks(inode, ex, start, start + len - 1);
 		ex->ee_block = cpu_to_le32(new_start);
@@ -1228,6 +1231,7 @@ static int ext4_ext_remove_leaf(struct inode *inode, struct ext4_ext_path *path,
 		else {
 			unwritten = ext4_ext_is_unwritten(ex);
 			ex->ee_len = cpu_to_le16(new_len);
+			ext4_ext_store_pblock(ex, newblock);
 			if (unwritten)
 				ext4_ext_mark_unwritten(ex);
 
@@ -1287,6 +1291,34 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 		!in_range(from, le32_to_cpu(path[depth].p_ext->ee_block),
 			 ext4_ext_get_actual_len(path[depth].p_ext))) {
 		ret = 0;
+		goto out;
+	}
+
+	/* If we do remove_space inside the range of an extent */
+	if ((cpu_to_le32(path[depth].p_ext->ee_block) < from) &&
+	    (to < cpu_to_le32(path[depth].p_ext->ee_block) +
+			ext4_ext_get_actual_len(path[depth].p_ext) - 1)) {
+
+		struct ext4_extent *ex = path[depth].p_ext, newex;
+		int unwritten = ext4_ext_is_unwritten(ex);
+		ext4_lblk_t ee_block = cpu_to_le32(ex->ee_block);
+		int32_t len = ext4_ext_get_actual_len(ex);
+		ext4_fsblk_t newblock =
+			to + 1 - ee_block + ext4_ext_pblock(ex);
+
+		ex->ee_len = cpu_to_le16(from - ee_block);
+		if (unwritten)
+			ext4_ext_mark_unwritten(ex);
+
+		__ext4_ext_dirty(inode, path + depth);
+
+		newex.ee_block = cpu_to_le32(to + 1);
+		newex.ee_len = cpu_to_le16(ee_block + len - 1 - to);
+		ext4_ext_store_pblock(&newex, newblock);
+		if (unwritten)
+			ext4_ext_mark_unwritten(&newex);
+
+		ret = ext4_ext_insert_extent(inode, &path, &newex, 0);
 		goto out;
 	}
 

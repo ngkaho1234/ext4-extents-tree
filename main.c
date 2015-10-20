@@ -124,7 +124,7 @@ int main(int argc, char **argv)
 	}
 #endif
 #ifndef CONFIG_EXTMAKER
-	err = ext4_ext_remove_space(inode, 0, (ext4_lblk_t)-1);
+	err = ext4_ext_remove_space(inode, 16384, (ext4_lblk_t)-1);
 	/*err = ext4_remove_space(inode, 0, CONFIG_NR_ITEMS);*/
 #endif
 	b = clock();
