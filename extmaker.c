@@ -95,30 +95,28 @@ int main(int argc, char **argv)
 {
 	int err;
 	struct inode *inode;
-	int64_t i;
 	int m = 0;
 	time_t a, b;
-	struct ext4_extent ex;
+	int64_t from, to;
 
 	if (argc < 2)
 		return -1;
 
 	inode = open_ext4_db(argv[1]);
+	from = strtoll(argv[2], NULL, 0);
+	to = strtoll(argv[3], NULL, 0);
 	a = clock();
 	for (m = 0;m < 1;m++)
 #if defined(CONFIG_REVERSE)
-		for (i = CONFIG_NR_ITEMS; i >= 0; i -= 1) {
+		for (; from >= to; from -= 1) {
 #else
-		for (i = 0; i <= CONFIG_NR_ITEMS; i += 1) {
+		for (; from <= to; from += 1) {
 #endif
 			static struct buffer_head bh_got;
-			ex.ee_block = i;
-			ex.ee_len = 1;
-			ext4_ext_store_pblock(&ex, i);
-			err = ext4_ext_get_blocks(NULL, inode, i, 1, &bh_got, 1, 0);
+			err = ext4_ext_get_blocks(NULL, inode, from, 1, &bh_got, 1, 0);
 			if (err < 0)
 				fprintf(stderr, "err: %s, block: %" PRIu64 "\n",
-						strerror(-err), i);
+						strerror(-err), from);
 
 		}
 

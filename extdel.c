@@ -2,6 +2,7 @@
 #include <time.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static int inode_writeback(struct inode *inode)
 {
@@ -96,13 +97,17 @@ int main(int argc, char **argv)
 	int err;
 	struct inode *inode;
 	time_t a, b;
+	ext4_lblk_t from, to;
 
-	if (argc < 2)
+	if (argc < 4)
 		return -1;
+
+	from = strtol(argv[2], NULL, 0);
+	to = strtol(argv[3], NULL, 0);
 
 	inode = open_ext4_db(argv[1]);
 	a = clock();
-	err = ext4_ext_remove_space(inode, 16384, CONFIG_NR_ITEMS);
+	err = ext4_ext_remove_space(inode, from, to);
 	b = clock();
 	fprintf(stderr, "err: %s, clock: %ld\n", strerror(-err), (b - a)/CLOCKS_PER_SEC);
 	free_ext4_db(inode);
