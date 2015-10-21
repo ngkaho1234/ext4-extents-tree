@@ -889,12 +889,12 @@ uint64_t simple_balloc(struct super_block *device, unsigned long blockcnt)
 	struct stat64 buf;
 	if(fstat64(device->s_bdev->bd_fd, &buf)) {
 		perror("fstat64");
-		printf("file size: %llu\n", buf.st_size);
+		printf("file size: %" PRIu64 "\n", buf.st_size);
 		return 0;
 	}
 	if (posix_fallocate(device->s_bdev->bd_fd, buf.st_size, (uint64_t)blockcnt * device->s_blocksize)) {
 		perror("fallocate64");
-		printf("file size: %llu, request blockcnt: %lu\n", buf.st_size, blockcnt);
+		printf("file size: %" PRIu64 ", request blockcnt: %lu\n", buf.st_size, blockcnt);
 		return 0;
 	}
 
@@ -906,7 +906,7 @@ uint64_t device_size(struct block_device *bdev)
 	struct stat64 buf;
 	if(fstat64(bdev->bd_fd, &buf)) {
 		perror("fstat64");
-		printf("file size: %llu\n", buf.st_size);
+		printf("file size: %" PRIu64 "\n", buf.st_size);
 		return 0;
 	}
 

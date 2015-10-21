@@ -28,6 +28,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <inttypes.h>
 
 #ifndef __glibc__
 #define DISABLE_BACKTRACE

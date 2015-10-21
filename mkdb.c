@@ -30,7 +30,7 @@ static int initialize_bitmap(struct db_header *bhdr, struct super_block *sb)
 	blocks_count = blocks_of_bitmap(sb, dev_blockcnt);
 
 	bitmap_bits_set(db_bitmap, 0);
-	printf("device block count: %llu, bitmap blocks count: %d\n", dev_blockcnt, blocks_count);
+	printf("device block count: %" PRIu64 ", bitmap blocks count: %d\n", dev_blockcnt, blocks_count);
 	for(i = 0;i < blocks_count;i++)
 		bitmap_bits_set(db_bitmap, bhdr->db_bitmap_block + i);
 

@@ -1,5 +1,6 @@
 #include "ext4.h"
 #include <time.h>
+#include <errno.h>
 #include <stdio.h>
 
 static int inode_writeback(struct inode *inode)
@@ -52,12 +53,11 @@ static void free_ext4_db(struct inode *inode)
 
 static struct inode *open_ext4_db(char *file)
 {
-	int fd, err;
+	int fd;
 	struct ext4_extent_header *ihdr;
 	struct inode *inode;
 	struct db_handle *db;
 	struct block_device *bdev;
-	ext4_fsblk_t block;
 
 	fd = device_open(file);
 
@@ -93,42 +93,37 @@ static struct inode *open_ext4_db(char *file)
 
 int main(int argc, char **argv)
 {
-	int ret, err;
+	int err;
 	struct inode *inode;
 	int64_t i;
 	int m = 0;
 	time_t a, b;
-	struct ext4_extent ex, *exp;
-	struct ext4_ext_path *path = NULL;
+	struct ext4_extent ex;
 
 	if (argc < 2)
 		return -1;
 
 	inode = open_ext4_db(argv[1]);
 	a = clock();
-#define CONFIG_NR_ITEMS 166400
 	for (m = 0;m < 1;m++)
-#ifdef CONFIG_EXTMAKER
 #if defined(CONFIG_REVERSE)
-	for (i = CONFIG_NR_ITEMS; i >= 0; i -= 1) {
+		for (i = CONFIG_NR_ITEMS; i >= 0; i -= 1) {
 #else
-	for (i = 0; i <= CONFIG_NR_ITEMS; i += 1) {
+		for (i = 0; i <= CONFIG_NR_ITEMS; i += 1) {
 #endif
-		static struct buffer_head bh_got;
-		ex.ee_block = i;
-		ex.ee_len = 1;
-		ext4_ext_store_pblock(&ex, i);
-#if defined(CONFIG_EXTMAKER)
-		err = ext4_ext_get_blocks(NULL, inode, i, 1, &bh_got, 1, 0);
-#endif
-	}
-#endif
-#ifndef CONFIG_EXTMAKER
-	err = ext4_ext_remove_space(inode, 16384, (ext4_lblk_t)-1);
-	/*err = ext4_remove_space(inode, 0, CONFIG_NR_ITEMS);*/
-#endif
+			static struct buffer_head bh_got;
+			ex.ee_block = i;
+			ex.ee_len = 1;
+			ext4_ext_store_pblock(&ex, i);
+			err = ext4_ext_get_blocks(NULL, inode, i, 1, &bh_got, 1, 0);
+			if (err < 0)
+				fprintf(stderr, "err: %s, block: %" PRIu64 "\n",
+						strerror(-err), i);
+
+		}
+
 	b = clock();
-	printf("clock: %d\n", (b - a)/CLOCKS_PER_SEC);
+	fprintf(stderr, "clock: %ld\n", (b - a)/CLOCKS_PER_SEC);
 	free_ext4_db(inode);
 
 	return 0;
