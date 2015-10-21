@@ -1030,12 +1030,12 @@ static int ext4_ext_grow_indepth(struct inode *inode,
 void print_path(struct ext4_ext_path *path)
 {
 	int i = path->p_depth;
-	printf("====================\n");
+	ext_debug("====================\n");
 	while (i >= 0) {
-		printf("depth %d, p_block: %llu, p_ext offset: %d, p_idx offset: %d\n", i,
-			path->p_block,
-			(path->p_ext)?(path->p_ext - EXT_FIRST_EXTENT(path->p_hdr)):0,
-			(path->p_idx)?(path->p_idx - EXT_FIRST_INDEX(path->p_hdr)):0);
+		ext_debug("depth %d, p_block: %" PRIu64 ", p_ext offset: %ld, p_idx offset: %ld\n", i,
+			  path->p_block,
+			  (path->p_ext)?(path->p_ext - EXT_FIRST_EXTENT(path->p_hdr)):0,
+			  (path->p_idx)?(path->p_idx - EXT_FIRST_INDEX(path->p_hdr)):0);
 		i--;
 		path++;
 	}
@@ -1147,7 +1147,7 @@ static void ext4_ext_remove_blocks(struct inode *inode, struct ext4_extent *ex,
 	ext4_fsblk_t start;
 	num = from - le32_to_cpu(ex->ee_block);
 	start = ext4_ext_pblock(ex) + num;
-	ext_debug("Freeing %u at %llu, %d\n", from, start, len);
+	ext_debug("Freeing %" PRIu32 " at %" PRIu64 ", %d\n", from, start, len);
 	ext4_ext_free_blocks(inode, start, len, 0);
 }
 
@@ -1170,7 +1170,7 @@ static int ext4_ext_remove_idx(struct inode *inode, struct ext4_ext_path *path, 
 	if (err)
 		return err;
 
-	ext_debug("IDX: Freeing %u at %llu, %d\n",
+	ext_debug("IDX: Freeing %" PRIu32 " at %" PRIu64 ", %d\n",
 		le32_to_cpu(path[i].p_idx->ei_block), leaf, 1);
 	ext4_ext_free_blocks(inode, leaf, 1, 0);
 
