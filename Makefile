@@ -1,25 +1,22 @@
 CC=gcc
-CFLAG=-g -fPIC -pie -I. -lpthread -lrt -Wall
+CFLAG=-g -fPIC -pie -I. -lpthread -lrt -Wall -DCONFIG_NR_ITEMS=166400
 
 COMMON_SRC=extents_bh.c buffer.c rbtree.c ext4_crc32.c db_bitmap.c db.c
 EXTENTS= $(COMMON_SRC) extents.c
 
-all: extdel extmaker extdel.rev extmaker.rev mkdb
+all: extdel extmaker extmaker.rev mkdb
 
-extdel: main.c $(EXTENTS)
-	$(CC) $(CFLAG) -DCONFIG_PACK_FILE $^ -o $@
+extdel: extdel.c $(EXTENTS)
+	$(CC) $(CFLAG) $^ -o $@
 
-extdel.rev: main.c $(EXTENTS)
-	$(CC) $(CFLAG) -DCONFIG_PACK_FILE -DCONFIG_REVERSE $^ -o $@
+extmaker: extmaker.c $(EXTENTS)
+	$(CC) $(CFLAG) $^ -o $@
 
-extmaker: main.c $(EXTENTS)
-	$(CC) $(CFLAG) -DCONFIG_EXTMAKER $^ -o $@
-
-extmaker.rev: main.c $(EXTENTS)
-	$(CC) $(CFLAG) -DCONFIG_EXTMAKER -DCONFIG_REVERSE $^ -o $@
+extmaker.rev: extmaker.c $(EXTENTS)
+	$(CC) $(CFLAG) -DCONFIG_REVERSE $^ -o $@
 
 mkdb: mkdb.c $(EXTENTS)
-	$(CC) $(CFLAG) -DCONFIG_EXTMAKER -DCONFIG_REVERSE $^ -o $@
+	$(CC) $(CFLAG) $^ -o $@
 
 clean:
-	rm -f extmaker extdel extmaker.rev extdel.rev mkdb
+	rm -f extmaker extdel extmaker.rev mkdb
