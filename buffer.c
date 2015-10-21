@@ -178,7 +178,9 @@ static int device_write(int fd, uint64_t block, int count, int blk_size,
 
 int device_open(const char *path)
 {
-    int disk_fd = open(path, O_RDWR|O_CREAT);
+    int disk_fd = open(path, O_RDWR|O_CREAT, S_IRUSR|S_IWUSR |
+		    			     S_IRGRP |
+					     S_IROTH);
     if (disk_fd < 0) {
         return -errno;
     }
