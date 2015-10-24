@@ -199,13 +199,29 @@ ext4_ext_new_meta_block(struct inode *inode,
 	return newblock;
 }
 
+static uint32_t ext4_ext_block_csum(struct inode *inode,
+				    struct ext4_extent_header *eh)
+{
+	return ext4_crc32c(inode->i_csum, eh, EXT4_EXTENT_TAIL_OFFSET(eh));
+}
+
+static void ext4_extent_block_csum_set(struct inode *inode,
+				    struct ext4_extent_header *eh)
+{
+	struct ext4_extent_tail *tail;
+
+	tail = find_ext4_extent_tail(eh);
+	tail->et_checksum = ext4_ext_block_csum(
+			inode, eh);
+}
+
 static int __ext4_ext_dirty(struct inode *inode,
 		      struct ext4_ext_path *path)
 {
 	int err;
 
 	if (path->p_bh) {
-		/*ext4_extent_block_csum_set(inode, ext_block_hdr(path->p_bh));*/
+		ext4_extent_block_csum_set(inode, ext_block_hdr(path->p_bh));
 		/* path points to block */
 		err = 0;
 		fs_mark_buffer_dirty(path->p_bh);
@@ -232,22 +248,6 @@ void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_other)
 			fs_brelse(path->p_bh);
 			path->p_bh = NULL;
 		}
-}
-
-static uint32_t ext4_ext_block_csum(struct inode *inode,
-				    struct ext4_extent_header *eh)
-{
-	return ext4_crc32c(inode->i_csum, eh, EXT4_EXTENT_TAIL_OFFSET(eh));
-}
-
-static void ext4_extent_block_csum_set(struct inode *inode,
-				    struct ext4_extent_header *eh)
-{
-	struct ext4_extent_tail *tail;
-
-	tail = find_ext4_extent_tail(eh);
-	tail->et_checksum = ext4_ext_block_csum(
-			inode, eh);
 }
 
 /*
@@ -670,6 +670,7 @@ out:
 		spt->ptr = 0;
 	} else if (bh) {
 		/* If we got a sibling leaf. */
+		ext4_extent_block_csum_set(inode, ext_block_hdr(bh));
 		fs_mark_buffer_dirty(bh);
 
 		spt->path.p_block = ext4_idx_pblock(ix);
@@ -928,6 +929,7 @@ out:
 		spt->ptr = 0;
 	} else if (bh) {
 		/* If we got a sibling leaf. */
+		ext4_extent_block_csum_set(inode, ext_block_hdr(bh));
 		fs_mark_buffer_dirty(bh);
 
 		spt->path.p_block = ext4_ext_pblock(ex);
