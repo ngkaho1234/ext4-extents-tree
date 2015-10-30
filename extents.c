@@ -996,10 +996,16 @@ again:
 				goto out;
 
 			path = *ppath;
+			/*
+			 * After growing the tree, there should be free space in
+			 * the only child node of the root.
+			 */
 			level--;
 			depth++;
 		}
+
 		i = depth - (level - 1);
+		/* We split from leaf to the i-th node */
 		if (level > 0) {
 			npath = kzalloc(sizeof(struct ext4_ext_path) * (level),
 					GFP_NOFS);
