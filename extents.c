@@ -485,109 +485,15 @@ static void ext4_ext_init_header(struct inode *inode, struct ext4_extent_header 
 	eh->eh_depth = depth;
 }
 
-/*
- * Be cautious, the buffer_head returned is not yet mark dirtied. */
-static int ext4_ext_split_node(struct inode *inode,
-			       struct ext4_ext_path *path,
-			       int at,
-			       struct ext4_extent *newext,
-			       ext4_fsblk_t *sibling,
-			       struct buffer_head **new_bh)
-{
-	int ret;
-	ext4_fsblk_t newblock;
-	struct buffer_head *bh = NULL;
-	int depth = ext_depth(inode);
-
-	assert(sibling);
-	assert(new_bh);
-	/* FIXME: currently we split at the point after the current extent. */
-	newblock = ext4_ext_new_meta_block(inode, path,
-					   newext, &ret, 0);
-	if (ret)
-		goto cleanup;
-
-	/*  For write access.*/
-	bh = fs_bwrite(inode->i_sb, newblock, &ret);
-	if (!bh)
-		goto cleanup;
-
-	if (at == depth) {
-		/* start copy from next extent */
-		int m = EXT_MAX_EXTENT(path[at].p_hdr) - path[at].p_ext;
-		struct ext4_extent_header *neh;
-		neh = ext_block_hdr(bh);
-		ext4_ext_init_header(inode, neh, 0);
-		if (m) {
-			struct ext4_extent *ex;
-			ex = EXT_FIRST_EXTENT(neh);
-			memmove(ex, path[at].p_ext + 1, sizeof(struct ext4_extent) * m);
-			le16_add_cpu(&neh->eh_entries, m);
-			le16_add_cpu(&path[at].p_hdr->eh_entries, -m);
-			ret = __ext4_ext_dirty(inode, path + at);
-			if (ret)
-				goto cleanup;
-
-		}
-	} else {
-		int m = EXT_MAX_INDEX(path[at].p_hdr) - path[at].p_idx;
-		struct ext4_extent_header *neh;
-		neh = ext_block_hdr(bh);
-		ext4_ext_init_header(inode, neh, depth - at);
-		if (m) {
-			struct ext4_extent_idx *ix;
-			ix = EXT_FIRST_INDEX(neh);
-			memmove(ix, path[at].p_idx + 1, sizeof(struct ext4_extent) * m);
-			le16_add_cpu(&neh->eh_entries, m);
-			le16_add_cpu(&path[at].p_hdr->eh_entries, -m);
-			ret = __ext4_ext_dirty(inode, path + at);
-			if (ret)
-				goto cleanup;
-
-		}
-	}
-cleanup:
-	if (ret) {
-		if (bh) {
-			fs_brelse(bh);
-			bh = NULL;
-		}
-		if (newblock)
-			ext4_ext_free_blocks(inode, newblock, 1, 0);
-
-		newblock = 0;
-	}
-	*sibling = newblock;
-	*new_bh = bh;
-	return ret;
-}
-
-static ext4_lblk_t ext4_ext_block_index(struct ext4_extent_header *eh)
-{
-	if (eh->eh_depth)
-		return le32_to_cpu(EXT_FIRST_INDEX(eh)->ei_block);
-	return le32_to_cpu(EXT_FIRST_EXTENT(eh)->ee_block);
-}
-
-#define EXT_INODE_HDR_NEED_GROW 0x1
-
-struct ext_split_trans {
-	ext4_fsblk_t	     ptr;
-	struct ext4_ext_path path;
-	int		     switch_to;
-};
-
-static int ext4_ext_insert_index(struct inode *inode,
-			       struct ext4_ext_path *path,
-			       int at,
-			       struct ext4_extent *newext,
-			       ext4_lblk_t insert_index,
-			       ext4_fsblk_t insert_block,
-			       struct ext_split_trans *spt)
+static int ext4_ext_insert_indes(struct inode *inode,
+				 struct ext4_ext_path *path,
+				 int at,
+				 ext4_lblk_t insert_index,
+				 ext4_fsblk_t insert_block,
+				 bool set_to_ix)
 {
 	struct ext4_extent_idx *ix;
 	struct ext4_ext_path *curp = path + at;
-	struct buffer_head *bh = NULL;
 	int len, err;
 	struct ext4_extent_header *eh;
 
@@ -595,58 +501,28 @@ static int ext4_ext_insert_index(struct inode *inode,
 		return -EIO;
 
 	if (le16_to_cpu(curp->p_hdr->eh_entries)
-			     == le16_to_cpu(curp->p_hdr->eh_max)) {
-		if (at) {
-			struct ext4_extent_header *neh;
-			err = ext4_ext_split_node(inode, path, at,
-						  newext, &spt->ptr, &bh);
-			if (err)
-				goto out;
+			     == le16_to_cpu(curp->p_hdr->eh_max))
+		return -EIO;
 
-			neh = ext_block_hdr(bh);
-			if (insert_index >
-				le32_to_cpu(curp->p_idx->ei_block)) {
-				/* Make decision which node should be used to insert the index.*/
-				if (le16_to_cpu(neh->eh_entries) > le16_to_cpu(curp->p_hdr->eh_entries)) {
-					eh = curp->p_hdr;
-					/* insert after */
-					ix = EXT_LAST_INDEX(eh) + 1;
-				} else {
-					eh = neh;
-					ix = EXT_FIRST_INDEX(eh);
-				}
-			} else {
-				eh = curp->p_hdr;
-				/* insert before */
-				ix = EXT_LAST_INDEX(eh);
-			}
-		} else {
-			err = EXT_INODE_HDR_NEED_GROW;
-			goto out;
-		}
+	eh = curp->p_hdr;
+	if (curp->p_idx == NULL) {
+		ix = EXT_FIRST_INDEX(eh);
+		curp->p_idx = ix;
+	} else if (insert_index > le32_to_cpu(curp->p_idx->ei_block)) {
+		/* insert after */
+		ix = curp->p_idx + 1;
 	} else {
-		eh = curp->p_hdr;
-		if (curp->p_idx == NULL) {
-			ix = EXT_FIRST_INDEX(eh);
-			curp->p_idx = ix;
-		} else if (insert_index > le32_to_cpu(curp->p_idx->ei_block)) {
-			/* insert after */
-			ix = curp->p_idx + 1;
-		} else {
-			/* insert before */
-			ix = curp->p_idx;
-		}
+		/* insert before */
+		ix = curp->p_idx;
 	}
+
+	if (ix > EXT_MAX_INDEX(eh))
+		return -EIO;
 
 	len = EXT_LAST_INDEX(eh) - ix + 1;
 	assert(len >= 0);
 	if (len > 0)
 		memmove(ix + 1, ix, len * sizeof(struct ext4_extent_idx));
-
-	if (ix > EXT_MAX_INDEX(eh)) {
-		err = -EIO;
-		goto out;
-	}
 
 	ix->ei_block = cpu_to_le32(insert_index);
 	ext4_idx_store_pblock(ix, insert_block);
@@ -657,49 +533,145 @@ static int ext4_ext_insert_index(struct inode *inode,
 		goto out;
 	}
 
-	if (eh == curp->p_hdr)
-		err = __ext4_ext_dirty(inode, curp);
-	else
-		err = 0;
+	err = __ext4_ext_dirty(inode, curp);
 
 out:
-	if (err) {
-		if (bh)
-			fs_brelse(bh);
-
-		spt->ptr = 0;
-	} else if (bh) {
-		/* If we got a sibling leaf. */
-		ext4_extent_block_csum_set(inode, ext_block_hdr(bh));
-		fs_mark_buffer_dirty(bh);
-
-		spt->path.p_block = ext4_idx_pblock(ix);
-		spt->path.p_depth = cpu_to_le16(eh->eh_depth);
-		spt->path.p_maxdepth = 0;
-		spt->path.p_ext = NULL;
-		spt->path.p_idx = ix;
-		spt->path.p_hdr = eh;
-		spt->path.p_bh = bh;
-
-		/*
-		 * If newext->ee_block can be included into the
-		 * right sub-tree.
-		 */
-		if (le32_to_cpu(newext->ee_block) >=
-			ext4_ext_block_index(ext_block_hdr(bh)))
-			spt->switch_to = 1;
-		else {
-			curp->p_idx = ix;
-			curp->p_block = ext4_idx_pblock(ix);
-		}
-	
-	} else {
-		spt->ptr = 0;
+	if (!err && set_to_ix) {
 		curp->p_idx = ix;
 		curp->p_block = ext4_idx_pblock(ix);
 	}
 	return err;
+}
 
+static int ext4_ext_split_nods(struct inode *inode,
+			       struct ext4_ext_path *path,
+			       int at,
+			       struct ext4_extent *newext,
+			       struct ext4_ext_path *npath,
+			       bool *ins_right_leaf)
+{
+	int i, npath_at, ret;
+	ext4_lblk_t insert_index;
+	ext4_fsblk_t newblock = 0;
+	int depth = ext_depth(inode);
+	npath_at = depth - at;
+
+	assert(at > 0);
+
+	if (path[depth].p_ext != EXT_MAX_EXTENT(path[depth].p_hdr))
+		insert_index = path[depth].p_ext[1].ee_block;
+	else
+		insert_index = newext->ee_block;
+
+	for (i = depth;i >= at;i--, npath_at--) {
+		struct buffer_head *bh = NULL;
+
+		/* FIXME: currently we split at the point after the current extent. */
+		newblock = ext4_ext_new_meta_block(inode, path,
+				newext, &ret, 0);
+		if (ret)
+			goto cleanup;
+
+		/*  For write access.*/
+		bh = fs_bwrite(inode->i_sb, newblock, &ret);
+		if (!bh)
+			goto cleanup;
+
+		if (i == depth) {
+			/* start copy from next extent */
+			int m = EXT_MAX_EXTENT(path[i].p_hdr) - path[i].p_ext;
+			struct ext4_extent_header *neh;
+			struct ext4_extent *ex;
+			neh = ext_block_hdr(bh);
+			ex = EXT_FIRST_EXTENT(neh);
+			ext4_ext_init_header(inode, neh, 0);
+			if (m) {
+				memmove(ex, path[i].p_ext + 1, sizeof(struct ext4_extent) * m);
+				le16_add_cpu(&neh->eh_entries, m);
+				le16_add_cpu(&path[i].p_hdr->eh_entries, -m);
+				ret = __ext4_ext_dirty(inode, path + i);
+				if (ret)
+					goto cleanup;
+
+				npath[npath_at].p_block = ext4_ext_pblock(ex);
+				npath[npath_at].p_ext = ex;
+			} else {
+				npath[npath_at].p_block = 0;
+				npath[npath_at].p_ext = NULL;
+			}
+
+			npath[npath_at].p_depth = cpu_to_le16(neh->eh_depth);
+			npath[npath_at].p_maxdepth = 0;
+			npath[npath_at].p_idx = NULL;
+			npath[npath_at].p_hdr = neh;
+			npath[npath_at].p_bh = bh;
+
+			fs_mark_buffer_dirty(bh);
+		} else {
+			int m = EXT_MAX_INDEX(path[i].p_hdr) - path[i].p_idx;
+			struct ext4_extent_header *neh;
+			struct ext4_extent_idx *ix;
+			neh = ext_block_hdr(bh);
+			ix = EXT_FIRST_INDEX(neh);
+			ext4_ext_init_header(inode, neh, depth - i);
+			ix->ei_block = cpu_to_le32(insert_index);
+			ext4_idx_store_pblock(ix,
+					ext4_bh_block(npath[npath_at+1].p_bh));
+			le16_add_cpu(&neh->eh_entries, 1);
+			if (m) {
+				memmove(ix + 1, path[i].p_idx + 1, sizeof(struct ext4_extent) * m);
+				le16_add_cpu(&neh->eh_entries, m);
+				le16_add_cpu(&path[i].p_hdr->eh_entries, -m);
+				ret = __ext4_ext_dirty(inode, path + i);
+				if (ret)
+					goto cleanup;
+
+			}
+
+			npath[npath_at].p_block = ext4_idx_pblock(ix);
+			npath[npath_at].p_depth = cpu_to_le16(neh->eh_depth);
+			npath[npath_at].p_maxdepth = 0;
+			npath[npath_at].p_ext = NULL;
+			npath[npath_at].p_idx = ix;
+			npath[npath_at].p_hdr = neh;
+			npath[npath_at].p_bh = bh;
+
+			fs_mark_buffer_dirty(bh);
+		}
+	}
+	newblock = 0;
+
+	/*
+	 * If newext->ee_block can be included into the
+	 * right sub-tree.
+	 */
+	if (le32_to_cpu(newext->ee_block) < insert_index)
+		*ins_right_leaf = false;
+	else
+		*ins_right_leaf = true;
+
+	ret = ext4_ext_insert_indes(inode, path, at - 1,
+			insert_index,
+			ext4_bh_block(npath[0].p_bh),
+			*ins_right_leaf);
+
+cleanup:
+	if (ret) {
+		if (newblock)
+			ext4_ext_free_blocks(inode, newblock, 1, 0);
+
+		npath_at = depth - at;
+		while (npath_at >= 0) {
+			if (npath[npath_at].p_bh) {
+				newblock = ext4_bh_block(npath[npath_at].p_bh);
+				fs_bforget(npath[npath_at].p_bh);
+				ext4_ext_free_blocks(inode, newblock, 1, 0);
+				npath[npath_at].p_bh = NULL;
+			}
+			npath_at--;
+		}
+	}
+	return ret;
 }
 
 /*
@@ -809,16 +781,16 @@ static inline int ext4_ext_can_append(struct ext4_extent *ex1, struct ext4_exten
 	return 1;
 }
 
+#define EXT_INODE_HDR_NEED_GROW 0x1
+
 static int ext4_ext_insert_leaf(struct inode *inode,
-			       struct ext4_ext_path *path,
-			       int at,
-			       struct ext4_extent *newext,
-			       struct ext_split_trans *spt,
-			       int flags)
+				struct ext4_ext_path *path,
+				int at,
+				struct ext4_extent *newext,
+				int flags)
 {
 	struct ext4_ext_path *curp = path + at;
 	struct ext4_extent *ex = curp->p_ext;
-	struct buffer_head *bh = NULL;
 	int len, err, unwritten;
 	struct ext4_extent_header *eh;
 
@@ -832,9 +804,9 @@ static int ext4_ext_insert_leaf(struct inode *inode,
 				+ ext4_ext_get_actual_len(newext));
 			if (unwritten)
 				ext4_ext_mark_unwritten(curp->p_ext);
+
 			err = __ext4_ext_dirty(inode, curp);
 			goto out;
-
 		}
 
 		if (curp->p_ext && ext4_ext_can_prepend(curp->p_ext, newext)) {
@@ -844,41 +816,16 @@ static int ext4_ext_insert_leaf(struct inode *inode,
 				+ ext4_ext_get_actual_len(newext));
 			if (unwritten)
 				ext4_ext_mark_unwritten(curp->p_ext);
+
 			err = __ext4_ext_dirty(inode, curp);
 			goto out;
-
 		}
 	}
 
 	if (le16_to_cpu(curp->p_hdr->eh_entries)
 			     == le16_to_cpu(curp->p_hdr->eh_max)) {
-		if (at) {
-			struct ext4_extent_header *neh;
-			err = ext4_ext_split_node(inode, path, at,
-						  newext, &spt->ptr, &bh);
-			if (err)
-				goto out;
-
-			neh = ext_block_hdr(bh);
-			if (le32_to_cpu(newext->ee_block) >
-				le32_to_cpu(curp->p_ext->ee_block)) {
-				if (le16_to_cpu(neh->eh_entries) > le16_to_cpu(curp->p_hdr->eh_entries)) {
-					eh = curp->p_hdr;
-					/* insert after */
-					ex = EXT_LAST_EXTENT(eh) + 1;
-				} else {
-					eh = neh;
-					ex = EXT_FIRST_EXTENT(eh);
-				}
-			} else {
-				eh = curp->p_hdr;
-				/* insert before */
-				ex = EXT_LAST_EXTENT(eh);
-			}
-		} else {
-			err = EXT_INODE_HDR_NEED_GROW;
-			goto out;
-		}
+		err = EXT_INODE_HDR_NEED_GROW;
+		goto out;
 	} else {
 		eh = curp->p_hdr;
 		if (curp->p_ext == NULL) {
@@ -913,47 +860,13 @@ static int ext4_ext_insert_leaf(struct inode *inode,
 		goto out;
 	}
 
-	if (eh == curp->p_hdr) {
-		err = ext4_ext_correct_indexes(inode, path);
-		if (err)
-			goto out;
-		err = __ext4_ext_dirty(inode, curp);
-	} else
-		err = 0;
+	err = ext4_ext_correct_indexes(inode, path);
+	if (err)
+		goto out;
+	err = __ext4_ext_dirty(inode, curp);
 
 out:
-	if (err) {
-		if (bh)
-			fs_brelse(bh);
-
-		spt->ptr = 0;
-	} else if (bh) {
-		/* If we got a sibling leaf. */
-		ext4_extent_block_csum_set(inode, ext_block_hdr(bh));
-		fs_mark_buffer_dirty(bh);
-
-		spt->path.p_block = ext4_ext_pblock(ex);
-		spt->path.p_depth = cpu_to_le16(eh->eh_depth);
-		spt->path.p_maxdepth = 0;
-		spt->path.p_ext = ex;
-		spt->path.p_idx = NULL;
-		spt->path.p_hdr = eh;
-		spt->path.p_bh = bh;
-
-		/*
-		 * If newext->ee_block can be included into the
-		 * right sub-tree.
-		 */
-		if (le32_to_cpu(newext->ee_block) >=
-			ext4_ext_block_index(ext_block_hdr(bh)))
-			spt->switch_to = 1;
-		else {
-			curp->p_ext = ex;
-			curp->p_block = ext4_ext_pblock(ex);
-		}
-
-	} else {
-		spt->ptr = 0;
+	if (!err) {
 		curp->p_ext = ex;
 		curp->p_block = ext4_ext_pblock(ex);
 	}
@@ -1045,99 +958,92 @@ void print_path(struct ext4_ext_path *path)
 
 static inline void
 ext4_ext_replace_path(struct ext4_ext_path *path,
-		      struct ext_split_trans *spt,
+		      struct ext4_ext_path *newpath,
 		      int depth,
-		      int level)
+		      int at)
 {
-	int i = depth - level;
-	ext4_ext_drop_refs(path + i, 1);
-	path[i] = spt[level].path;
+	ext4_ext_drop_refs(path + at, 1);
+	path[at] = *newpath;
+	memset(newpath, 0, sizeof(struct ext4_ext_path));
 }
 
 int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext, int flags)
 {
-	int i, depth, level, ret = 0;
-	ext4_fsblk_t ptr = 0;
+	int depth, level, ret = 0;
 	struct ext4_ext_path *path = *ppath;
-	struct ext_split_trans *spt = NULL, newblock = {0};
+	struct ext4_ext_path *npath = NULL;
+	bool ins_right_leaf = false;
 
-	depth = ext_depth(inode);
-	for (i = depth, level = 0;i >= 0;i--, level++)
-		if (EXT_HAS_FREE_INDEX(path + i))
-			break;
-
-	if (level) {
-		spt = kzalloc(sizeof(struct ext_split_trans) * (level),
-				GFP_NOFS);
-		if (!spt) {
-			ret = -ENOMEM;
-			goto out;
-		}
-	}
-	i = 0;
 again:
 	depth = ext_depth(inode);
-
-	do {
-		if (!i) {
-			ret = ext4_ext_insert_leaf(inode, path, depth - i,
-					     newext, &newblock,
-					     flags);
-		} else {
-			ret = ext4_ext_insert_index(inode, path, depth - i,
-					     newext,
-					     ext4_ext_block_index(ext_block_hdr(spt[i-1].path.p_bh)),
-					     spt[i-1].ptr,
-					     &newblock);
-		}
-		ptr = newblock.ptr;
-
-		if (ret && ret != EXT_INODE_HDR_NEED_GROW)
-			goto out;
-		else if (spt && ptr && !ret) {
-			/* Prepare for the next iteration after splitting. */
-			spt[i] = newblock;
-		}
-
-		i++;
-	} while (ptr != 0 && i <= depth);
-	
+	ret = ext4_ext_insert_leaf(inode, path, depth,
+				   newext,
+				   flags);
 	if (ret == EXT_INODE_HDR_NEED_GROW) {
-		ret = ext4_ext_grow_indepth(inode, 0);
-		if (ret)
-			goto out;
-		ret = ext4_find_extent(inode, le32_to_cpu(newext->ee_block), ppath, 0);
-		if (ret)
-			goto out;
-		i = depth;
-		path = *ppath;
+		int i;
+		for (i = depth, level = 0;i >= 0;i--, level++)
+			if (EXT_HAS_FREE_INDEX(path + i))
+				break;
+
+		/* Do we need to grow the tree? */
+		if (i < 0) {
+			ret = ext4_ext_grow_indepth(inode, 0);
+			if (ret)
+				goto out;
+
+			ret = ext4_find_extent(inode, le32_to_cpu(newext->ee_block), ppath, 0);
+			if (ret)
+				goto out;
+
+			path = *ppath;
+			level--;
+			depth++;
+		}
+		i = depth - (level - 1);
+		if (level > 0) {
+			npath = kzalloc(sizeof(struct ext4_ext_path) * (level),
+					GFP_NOFS);
+			if (!npath) {
+				ret = -ENOMEM;
+				goto out;
+			}
+			ret = ext4_ext_split_nods(inode, path, i,
+						  newext, npath,
+						  &ins_right_leaf);
+			if (ret)
+				goto out;
+
+			while (--level >= 0) {
+				if (ins_right_leaf)
+					ext4_ext_replace_path(path,
+							&npath[level],
+							depth,
+							i + level);
+				else if (npath[level].p_bh)
+					ext4_ext_drop_refs(npath + level, 1);
+
+			}
+		}
 		goto again;
 	}
+
 out:
 	if (ret) {
 		if (path)
 			ext4_ext_drop_refs(path, 0);
 
-		while (--level >= 0 && spt) {
-			if (spt[level].ptr) {
-				ext4_ext_free_blocks(inode, spt[level].ptr, 1, 0);
-				ext4_ext_drop_refs(&spt[level].path, 1);
+		while (--level >= 0 && npath) {
+			if (npath[level].p_bh) {
+				ext4_fsblk_t block =
+					ext4_bh_block(npath[level].p_bh);
+				ext4_ext_free_blocks(inode, block, 1, 0);
+				ext4_ext_drop_refs(npath + level, 1);
 			}
 		}
-	} else {
-		while (--level >= 0 && spt) {
-			if (spt[level].switch_to)
-				ext4_ext_replace_path(path,
-						      spt,
-						      depth,
-						      level);
-			else if (spt[level].ptr)
-				ext4_ext_drop_refs(&spt[level].path, 1);
-
-		}
 	}
-	if (spt)
-		kfree(spt);
+	if (npath)
+		kfree(npath);
+
 	return ret;
 }
 
