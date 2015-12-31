@@ -543,7 +543,7 @@ out:
 	return err;
 }
 
-static int ext4_ext_split_nods(struct inode *inode,
+static int ext4_ext_split_node(struct inode *inode,
 			       struct ext4_ext_path *path,
 			       int at,
 			       struct ext4_extent *newext,
@@ -1013,7 +1013,7 @@ again:
 				ret = -ENOMEM;
 				goto out;
 			}
-			ret = ext4_ext_split_nods(inode, path, i,
+			ret = ext4_ext_split_node(inode, path, i,
 						  newext, npath,
 						  &ins_right_leaf);
 			if (ret)
