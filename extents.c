@@ -678,7 +678,6 @@ cleanup:
  * ext4_ext_correct_indexes:
  * if leaf gets modified and modified extent is first in the leaf,
  * then we have to correct all indexes above.
- * TODO: do we need to correct tree in all cases?
  */
 static int ext4_ext_correct_indexes(struct inode *inode,
 				    struct ext4_ext_path *path)
@@ -692,9 +691,8 @@ static int ext4_ext_correct_indexes(struct inode *inode,
 	eh = path[depth].p_hdr;
 	ex = path[depth].p_ext;
 
-	if (ex == NULL || eh == NULL) {
+	if (ex == NULL || eh == NULL)
 		return -EIO;
-	}
 
 	if (depth == 0) {
 		/* there is no tree at all */
@@ -706,9 +704,6 @@ static int ext4_ext_correct_indexes(struct inode *inode,
 		return 0;
 	}
 
-	/*
-	 * TODO: we need correction if border is smaller than current one
-	 */
 	k = depth - 1;
 	border = path[depth].p_ext->ee_block;
 	path[k].p_idx->ei_block = border;
