@@ -942,7 +942,7 @@ void print_path(struct ext4_ext_path *path)
 	int i = path->p_depth;
 	ext_debug("====================\n");
 	while (i >= 0) {
-		ext_debug("depth %d, p_block: %" PRIu64 ", p_ext offset: %ld, p_idx offset: %ld\n", i,
+		ext_debug("depth: %" PRIu32 ", p_block: %" PRIu64 ", p_ext offset: %td, p_idx offset: %td\n", i,
 			  path->p_block,
 			  (path->p_ext)?(path->p_ext - EXT_FIRST_EXTENT(path->p_hdr)):0,
 			  (path->p_idx)?(path->p_idx - EXT_FIRST_INDEX(path->p_hdr)):0);
@@ -954,7 +954,6 @@ void print_path(struct ext4_ext_path *path)
 static inline void
 ext4_ext_replace_path(struct ext4_ext_path *path,
 		      struct ext4_ext_path *newpath,
-		      int depth,
 		      int at)
 {
 	ext4_ext_drop_refs(path + at, 1);
@@ -1018,7 +1017,6 @@ again:
 				if (ins_right_leaf)
 					ext4_ext_replace_path(path,
 							&npath[level],
-							depth,
 							i + level);
 				else if (npath[level].p_bh)
 					ext4_ext_drop_refs(npath + level, 1);
@@ -1319,8 +1317,7 @@ out:
 int ext4_ext_split_extent_at(struct inode *inode,
 			     struct ext4_ext_path **ppath,
 			     ext4_lblk_t split,
-			     int split_flag,
-			     int flags)
+			     int split_flag)
 {
 	struct ext4_extent *ex, newex;
 	ext4_fsblk_t newblock;
@@ -1379,8 +1376,7 @@ static int ext4_ext_convert_to_initialized (
 		struct inode *inode,
 		struct ext4_ext_path **ppath,
 		ext4_lblk_t split,
-		unsigned long blocks,
-		int flags)
+		unsigned long blocks)
 {
 	int depth = ext_depth(inode), err;
 	struct ext4_extent *ex = (*ppath)[depth].p_ext;
@@ -1391,18 +1387,18 @@ static int ext4_ext_convert_to_initialized (
 				+ ext4_ext_get_actual_len(ex)) {
 		/* split and initialize right part */
 		err = ext4_ext_split_extent_at(inode, ppath, split,
-				EXT4_EXT_MARK_UNWRIT1, flags);
+				EXT4_EXT_MARK_UNWRIT1);
 	} else if (le32_to_cpu(ex->ee_block) == split) {
 		/* split and initialize left part */
 		err = ext4_ext_split_extent_at(inode, ppath, split + blocks,
-				EXT4_EXT_MARK_UNWRIT2, flags);
+				EXT4_EXT_MARK_UNWRIT2);
 	} else {
 		/* split 1 extent to 3 and initialize the 2nd */
 		err = ext4_ext_split_extent_at(inode, ppath, split + blocks,
-				EXT4_EXT_MARK_UNWRIT1 | EXT4_EXT_MARK_UNWRIT2, flags);
+				EXT4_EXT_MARK_UNWRIT1 | EXT4_EXT_MARK_UNWRIT2);
 		if (!err) {
 			err = ext4_ext_split_extent_at(inode, ppath, split,
-					EXT4_EXT_MARK_UNWRIT1, flags);
+					EXT4_EXT_MARK_UNWRIT1);
 		}
 	}
 
@@ -1480,15 +1476,16 @@ static int ext4_ext_zero_unwritten_range(struct inode *inode,
 	return err;
 }
 
-int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_fsblk_t iblock,
+int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_lblk_t iblock,
 			unsigned long max_blocks, struct buffer_head *bh_result,
-			int create, int extend_disksize)
+			int create)
 {
 	struct ext4_ext_path *path = NULL;
 	struct ext4_extent newex, *ex;
 	int goal, err = 0, depth;
 	unsigned long allocated = 0;
-	ext4_fsblk_t next, newblock;
+	ext4_lblk_t next;
+	ext4_fsblk_t newblock;
 
 	clear_buffer_new(bh_result);
 
@@ -1530,7 +1527,7 @@ int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_fsblk_t iblock,
 
 					err = ext4_ext_convert_to_initialized(
 					    inode, &path, iblock,
-					    zero_range, 0);
+					    zero_range);
 					if (err)
 						goto out2;
 

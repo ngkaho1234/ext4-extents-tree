@@ -270,9 +270,9 @@ static inline void ext4_idx_store_pblock(struct ext4_extent_idx *ix,
 	__ext4_ext_dirty(__func__, __LINE__, (handle), (inode), (path))
 
 
-int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_fsblk_t iblock,
+int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_lblk_t iblock,
 			unsigned long max_blocks, struct buffer_head *bh_result,
-			int create, int extend_disksize);
+			int create);
 
 void ext4_ext_init(struct super_block *sb);
 

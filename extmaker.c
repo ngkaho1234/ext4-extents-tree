@@ -113,7 +113,7 @@ int main(int argc, char **argv)
 		for (; from <= to; from += 1) {
 #endif
 			static struct buffer_head bh_got;
-			err = ext4_ext_get_blocks(NULL, inode, from, 1, &bh_got, 1, 0);
+			err = ext4_ext_get_blocks(NULL, inode, from, 1, &bh_got, 1);
 			if (err < 0)
 				fprintf(stderr, "err: %s, block: %" PRIu64 "\n",
 						strerror(-err), from);
