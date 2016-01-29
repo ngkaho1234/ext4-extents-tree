@@ -3,6 +3,8 @@
 #include <string.h>
 #include <malloc.h>
 
+#define UNUSED(name) ({(void)(name);})
+
 /*
  * used by extent splitting.
  */
@@ -24,14 +26,17 @@ static inline int ext4_mark_inode_dirty(struct inode *inode)
 	return 0;
 }
 
-#define ext4_inode_to_goal_block(inode) (0)
+#define ext4_inode_to_goal_block(inode) ({ UNUSED(inode); 0;})
 
 static inline int ext4_allocate_single_block(struct inode *inode,
 					     ext4_fsblk_t fake,
 					     ext4_fsblk_t *blockp,
-					     unsigned long count)
+					     ext4_lblk_t count)
 {
 	int err;
+	UNUSED(fake);
+	UNUSED(count);
+
 	err = bitmap_find_bits_clr(inode->i_db->db_bitmap, 0,
 			inode->i_db->db_header->db_nrblocks - 1,
 			blockp);
@@ -44,10 +49,11 @@ static inline int ext4_allocate_single_block(struct inode *inode,
 static ext4_fsblk_t ext4_new_meta_blocks(struct inode *inode,
 			ext4_fsblk_t goal,
 			unsigned int flags,
-			unsigned long *count, int *errp)
+			ext4_lblk_t *count, int *errp)
 {
 	ext4_fsblk_t block = 0;
-	unsigned long nrblocks = (count)?(*count):1;
+	ext4_lblk_t nrblocks = (count)?(*count):1;
+	UNUSED(flags);
 
 	*errp = ext4_allocate_single_block(inode, goal, &block, nrblocks);
 	if (count)
@@ -56,8 +62,10 @@ static ext4_fsblk_t ext4_new_meta_blocks(struct inode *inode,
 }
 
 static void ext4_ext_free_blocks(struct inode *inode,
-				 ext4_fsblk_t block, int count, int flags)
+				 ext4_fsblk_t block,
+				 int count, int flags)
 {
+	UNUSED(flags);
 	bitmap_bits_free(inode->i_db->db_bitmap, block, count);
 }
 
@@ -260,6 +268,7 @@ static int ext4_ext_check(struct inode *inode,
 {
 	struct ext4_extent_tail *tail;
 	const char *error_msg = NULL;
+	UNUSED(pblk);
 
 	if (eh->eh_magic != cpu_to_le16(EXT4_EXT_MAGIC)) {
 		error_msg = "invalid magic";
@@ -296,6 +305,7 @@ read_extent_tree_block(struct inode *inode, ext4_fsblk_t pblk, int depth,
 {
 	struct buffer_head		*bh;
 	int				err;
+	UNUSED(flags);
 
 	if (perr)
 		*perr = 0;
@@ -329,8 +339,7 @@ errout:
  * the header must be checked before calling this
  */
 static void
-ext4_ext_binsearch_idx(struct inode *inode,
-			struct ext4_ext_path *path, ext4_lblk_t block)
+ext4_ext_binsearch_idx(struct ext4_ext_path *path, ext4_lblk_t block)
 {
 	struct ext4_extent_header *eh = path->p_hdr;
 	struct ext4_extent_idx *r, *l, *m;
@@ -355,8 +364,7 @@ ext4_ext_binsearch_idx(struct inode *inode,
  * the header must be checked before calling this
  */
 static void
-ext4_ext_binsearch(struct inode *inode,
-		struct ext4_ext_path *path, ext4_lblk_t block)
+ext4_ext_binsearch(struct ext4_ext_path *path, ext4_lblk_t block)
 {
 	struct ext4_extent_header *eh = path->p_hdr;
 	struct ext4_extent *r, *l, *m;
@@ -427,7 +435,7 @@ int ext4_find_extent(struct inode *inode, ext4_lblk_t block,
 	i = depth;
 	/* walk through the tree */
 	while (i) {
-		ext4_ext_binsearch_idx(inode, path + ppos, block);
+		ext4_ext_binsearch_idx(path + ppos, block);
 		path[ppos].p_block = ext4_idx_pblock(path[ppos].p_idx);
 		path[ppos].p_depth = i;
 		path[ppos].p_ext = NULL;
@@ -459,7 +467,7 @@ int ext4_find_extent(struct inode *inode, ext4_lblk_t block,
 	path[ppos].p_idx = NULL;
 
 	/* find extent */
-	ext4_ext_binsearch(inode, path + ppos, block);
+	ext4_ext_binsearch(path + ppos, block);
 	/* if not an empty leaf */
 	if (path[ppos].p_ext)
 		path[ppos].p_block = ext4_ext_pblock(path[ppos].p_ext);
@@ -1170,7 +1178,7 @@ static int ext4_ext_remove_leaf(struct inode *inode, struct ext4_ext_path *path,
 	return err;
 }
 
-static int inline
+static inline int
 ext4_ext_more_to_rm(struct ext4_ext_path *path, ext4_lblk_t to)
 {
 	if (!le16_to_cpu(path->p_hdr->eh_entries))
@@ -1408,6 +1416,7 @@ static int ext4_ext_convert_to_initialized (
 int ext4_ext_tree_init(void *v, struct inode *inode)
 {
 	struct ext4_extent_header *eh;
+	UNUSED(v);
 
 	eh = ext_inode_hdr(inode);
 	eh->eh_depth = 0;
@@ -1483,9 +1492,10 @@ int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_lblk_t iblock,
 	struct ext4_ext_path *path = NULL;
 	struct ext4_extent newex, *ex;
 	int goal, err = 0, depth;
-	unsigned long allocated = 0;
+	ext4_lblk_t allocated = 0;
 	ext4_lblk_t next;
 	ext4_fsblk_t newblock;
+	UNUSED(handle);
 
 	clear_buffer_new(bh_result);
 
@@ -1594,5 +1604,5 @@ out2:
 		kfree(path);
 	}
 
-	return err ? err : allocated;
+	return err ? err : (int)allocated;
 }
