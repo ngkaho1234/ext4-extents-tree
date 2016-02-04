@@ -1103,6 +1103,59 @@ static int ext4_ext_remove_idx(struct inode *inode, struct ext4_ext_path *path, 
 	return err;
 }
 
+/*
+ * NOTE: After removal, path should not be reused.
+ */
+int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
+{
+	int len;
+	int err = 0;
+	ext4_lblk_t start;
+	uint16_t new_entries;
+	int depth = ext_depth(inode);
+	struct ext4_extent *ex = path[depth].p_ext,
+			   *ex2 = ex + 1;
+	struct ext4_extent_header *eh = path[depth].p_hdr;
+	if (!ex)
+		return -EINVAL;
+
+	start = le32_to_cpu(ex->ee_block);
+	len = ext4_ext_get_actual_len(ex);
+	new_entries = le16_to_cpu(eh->eh_entries) - 1;
+
+	ext4_ext_remove_blocks(inode, ex, start, start + len - 1);
+	if (ex2 <= EXT_LAST_EXTENT(eh))
+		memmove(ex, ex2,
+			(EXT_LAST_EXTENT(eh) - ex2 + 1) * sizeof(struct ext4_extent));
+	eh->eh_entries = cpu_to_le16(new_entries);
+
+	__ext4_ext_dirty(inode, path + depth);
+	if (path[depth].p_ext == EXT_FIRST_EXTENT(eh)
+		&& eh->eh_entries) {
+		err = ext4_ext_correct_indexes(inode, path);
+		if (err)
+			return err;
+	}
+
+	/* if the node is free, then we should
+	 * remove it from index block above */
+	while (depth) {
+		eh = path[depth].p_hdr;
+		if (eh->eh_entries == 0 && path[depth].p_bh != NULL) {
+			err = ext4_ext_remove_idx(inode, path, depth - 1);
+			if (err)
+				break;
+
+			ext4_ext_drop_refs(path + depth, 1);
+		} else
+			break;
+
+		depth--;
+	}
+
+	return err;
+}
+
 static int ext4_ext_remove_leaf(struct inode *inode, struct ext4_ext_path *path, ext4_lblk_t from, ext4_lblk_t to)
 {
 	
