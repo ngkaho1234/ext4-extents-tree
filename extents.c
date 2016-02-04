@@ -1159,7 +1159,8 @@ static int ext4_ext_remove_leaf(struct inode *inode, struct ext4_ext_path *path,
 		ex2 = ex;
 
 	if (ex2 <= EXT_LAST_EXTENT(eh))
-		memmove(start_ex, ex2, EXT_LAST_EXTENT(eh) - ex2 + 1);
+		memmove(start_ex, ex2,
+			(EXT_LAST_EXTENT(eh) - ex2 + 1) * sizeof(struct ext4_extent));
 
 	eh->eh_entries = cpu_to_le16(new_entries);
 	__ext4_ext_dirty(inode, path + depth);
