@@ -133,7 +133,7 @@ int main(int argc, char **argv)
 
 	if (path) {
 		ext4_ext_drop_refs(path, false);
-		free(path);
+		kfree(path);
 	}
 
 	b = clock();
