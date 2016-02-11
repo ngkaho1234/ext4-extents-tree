@@ -493,7 +493,7 @@ static void ext4_ext_init_header(struct inode *inode, struct ext4_extent_header 
 	eh->eh_depth = depth;
 }
 
-static int ext4_ext_insert_indes(struct inode *inode,
+static int ext4_ext_insert_index(struct inode *inode,
 				 struct ext4_ext_path *path,
 				 int at,
 				 ext4_lblk_t insert_index,
@@ -658,7 +658,7 @@ static int ext4_ext_split_node(struct inode *inode,
 	else
 		*ins_right_leaf = true;
 
-	ret = ext4_ext_insert_indes(inode, path, at - 1,
+	ret = ext4_ext_insert_index(inode, path, at - 1,
 			insert_index,
 			ext4_bh_block(npath[0].p_bh),
 			*ins_right_leaf);
