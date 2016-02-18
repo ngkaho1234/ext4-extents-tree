@@ -1,5 +1,5 @@
-CC=gcc
-CFLAG=-g -fPIC -pie -I. -lpthread -lrt -Wall -DCONFIG_NR_ITEMS=166400
+CC=clang
+CFLAG=-g -fPIC -pie -I. -lpthread -lrt -Wall -DUSE_AIO -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE
 
 COMMON_SRC=extents_bh.c buffer.c rbtree.c ext4_crc32.c db_bitmap.c db.c
 EXTENTS= $(COMMON_SRC) extents.c

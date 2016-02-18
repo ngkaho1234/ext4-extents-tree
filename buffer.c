@@ -12,8 +12,6 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-
  */
-#define _LARGEFILE64_SOURCE
-#define _FILE_OFFSET_BITS 64
 
 #include <fcntl.h>
 #include <string.h>

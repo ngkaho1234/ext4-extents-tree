@@ -6,7 +6,6 @@
 #include <semaphore.h>
 #include <errno.h>
 
-#define USE_AIO
 #ifdef USE_AIO
 #include <aio.h>
 #include <signal.h>
