@@ -1070,7 +1070,7 @@ again:
 
 out:
 	if (npath)
-		ext4_ext_free_path(npath, ret);
+		ext4_ext_free_path(npath, ret ? 1 : 0);
 
 	return ret;
 }
@@ -1394,7 +1394,7 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 	}
 
 out:
-	ext4_ext_free_path(path, ret);
+	ext4_ext_free_path(path, ret ? 1 : 0);
 	path = NULL;
 	return ret;
 }
@@ -1677,7 +1677,7 @@ out:
 	bh_result->b_blocknr = newblock;
 out2:
 	if (path)
-		ext4_ext_free_path(path, err);
+		ext4_ext_free_path(path, err ? 1 : 0);
 
 	return err ? err : (int)allocated;
 }
