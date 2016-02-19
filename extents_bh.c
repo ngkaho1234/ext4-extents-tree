@@ -47,6 +47,7 @@ void fs_mark_buffer_dirty(struct buffer_head *bh)
 
 void fs_bforget(struct buffer_head *bh)
 {
+	clear_buffer_uptodate(bh);
 	clear_buffer_dirty(bh);
 	fs_brelse(bh);
 }
