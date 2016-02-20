@@ -216,8 +216,15 @@ static inline int ext4_ext_is_unwritten(struct ext4_extent *ext)
 	return (le16_to_cpu(ext->ee_len) > EXT_INIT_MAX_LEN);
 }
 
-#define e_block_to_cpu(x) le32_to_cpu(x)
-#define cpu_to_e_block(x) cpu_to_le32(x)
+static inline ext4_lblk_t ext4_ext_lblock(struct ext4_extent *ex)
+{
+	return le32_to_cpu(ex->ee_block);
+}
+
+static inline ext4_lblk_t ext4_idx_lblock(struct ext4_extent_idx *ix)
+{
+	return le32_to_cpu(ix->ei_block);
+}
 
 /*
  * ext4_ext_pblock:
@@ -243,6 +250,18 @@ static inline ext4_fsblk_t ext4_idx_pblock(struct ext4_extent_idx *ix)
 	block = ix->ei_leaf_lo;
 	block |= ((ext4_fsblk_t)ix->ei_leaf_hi << 31) << 1;
 	return block;
+}
+
+static inline void ext4_ext_store_lblock(struct ext4_extent *ex,
+				       ext4_lblk_t lblk)
+{
+	ex->ee_block = cpu_to_le32(lblk);
+}
+
+static inline void ext4_idx_store_lblock(struct ext4_extent_idx *ix,
+				       ext4_lblk_t lblk)
+{
+	ix->ei_block = cpu_to_le32(lblk);
 }
 
 /*
