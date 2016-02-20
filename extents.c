@@ -3,11 +3,6 @@
 #include <string.h>
 #include <malloc.h>
 
-#define UNUSED(name) ({(void)(name);})
-
-#define e_block_to_cpu(x) le32_to_cpu(x)
-#define cpu_to_e_block(x) cpu_to_le32(x)
-
 /*
  * used by extent splitting.
  */
@@ -20,9 +15,11 @@
 #define EXT4_EXT_DATA_VALID2	0x10 /* second half contains valid data */
 #define EXT4_EXT_NO_COMBINE	0x20 /* do not combine two extents */
 
-/*#ifdef _EXTENTS_TEST*/
+#define _EXTENTS_TEST
+
+#ifdef _EXTENTS_TEST
 #define AGGRESSIVE_TEST
-#if 1
+
 static inline int ext4_mark_inode_dirty(struct inode *inode)
 {
 	inode->i_data_dirty = 1;

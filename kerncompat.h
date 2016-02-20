@@ -76,6 +76,8 @@ static inline void assert_trace(const char *assertion, const char *filename,
 
 #endif
 
+#define UNUSED(name) ({(void)(name);})
+
 typedef unsigned int u32;
 typedef unsigned int __u32;
 typedef unsigned long long u64;

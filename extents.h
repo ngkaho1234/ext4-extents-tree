@@ -216,6 +216,9 @@ static inline int ext4_ext_is_unwritten(struct ext4_extent *ext)
 	return (le16_to_cpu(ext->ee_len) > EXT_INIT_MAX_LEN);
 }
 
+#define e_block_to_cpu(x) le32_to_cpu(x)
+#define cpu_to_e_block(x) cpu_to_le32(x)
+
 /*
  * ext4_ext_pblock:
  * combine low and high parts of physical block number into ext4_fsblk_t
