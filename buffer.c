@@ -694,6 +694,18 @@ void after_buffer_sync(struct buffer_head *bh, int uptodate)
 	sem_post(&bh->b_event);
 }
 
+void after_buffer_write(struct buffer_head *bh, int uptodate)
+{
+	if (uptodate)
+		set_buffer_uptodate(bh);
+
+	put_bh(bh);
+	remove_buffer_from_writeback(bh);
+	clear_buffer_dirty(bh);
+	unlock_buffer(bh);
+	sem_post(&bh->b_event);
+}
+
 void after_submit_read(struct buffer_head *bh, int uptodate)
 {
 	if (uptodate)
@@ -748,7 +760,7 @@ int write_dirty_buffer(struct buffer_head *bh)
 
 	if (buffer_dirty(bh)) {
 		get_bh(bh);
-		bh->b_end_io = after_buffer_sync;
+		bh->b_end_io = after_buffer_write;
 		ret = submit_bh(WRITE, bh);
 	} else {
 		unlock_buffer(bh);
