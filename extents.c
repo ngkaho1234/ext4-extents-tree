@@ -1573,6 +1573,8 @@ int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_lblk_t iblock,
 
 	clear_buffer_new(bh_result);
 
+	fs_start_trans(inode->i_sb);
+
 	/* find extent for this block */
 	err = ext4_find_extent(inode, iblock, &path, 0);
 	if (err) {
@@ -1675,6 +1677,8 @@ out:
 out2:
 	if (path)
 		ext4_ext_free_path(path, err ? 1 : 0);
+
+	fs_stop_trans(inode->i_sb);
 
 	return err ? err : (int)allocated;
 }

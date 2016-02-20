@@ -1,6 +1,10 @@
 #ifndef _EXTENTS_BH_H
 #define _EXTENTS_BH_H
 
+void fs_start_trans(struct super_block *sb);
+
+void fs_stop_trans(struct super_block *sb);
+
 struct buffer_head *fs_bread(struct super_block *sb, ext4_fsblk_t block, int *ret);
 
 void fs_brelse(struct buffer_head *bh);

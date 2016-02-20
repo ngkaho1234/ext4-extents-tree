@@ -4,18 +4,37 @@
 static int fs_bh_alloc = 0;
 static int fs_bh_freed = 0;
 
+void fs_start_trans(struct super_block *sb)
+{
+	__sync_fetch_and_add((int *)&sb->s_fs_info, 1);
+}
+
+void fs_stop_trans(struct super_block *sb)
+{
+	UNUSED(sb);
+}
 
 struct buffer_head *fs_bread(struct super_block *sb, ext4_fsblk_t block, int *ret)
 {
 	int err = 0;
 	struct buffer_head *bh;
 	bh = sb_getblk(sb, block);
+	if (!bh)
+		return NULL;
+
+	if (bh->b_private != sb->s_fs_info &&
+	    buffer_dirty(bh) &&
+	    buffer_uptodate(bh)) {
+		write_dirty_buffer(bh);
+	}
+
 	err = bh_submit_read(bh);
 	wait_on_buffer(bh);
 	if (ret)
 		*ret = err;
-	if (bh)
-		fs_bh_alloc++;
+
+	bh->b_private = sb->s_fs_info;
+	fs_bh_alloc++;
 
 	return bh;
 }
@@ -27,8 +46,18 @@ struct buffer_head *fs_bwrite(struct super_block *sb, ext4_fsblk_t block, int *r
 	bh = sb_getblk(sb, block);
 	if (ret)
 		*ret = err;
-	if (bh)
+
+	if (bh &&
+	    bh->b_private != sb->s_fs_info &&
+	    buffer_dirty(bh) &&
+	    buffer_uptodate(bh)) {
+		write_dirty_buffer(bh);
+	}
+
+	if (bh) {
+		bh->b_private = sb->s_fs_info;
 		fs_bh_alloc++;
+	}
 
 	return bh;
 }

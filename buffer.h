@@ -225,6 +225,9 @@ void bdev_free(struct block_device *bdev);
 struct buffer_head *buffer_alloc(struct block_device *bdev, uint64_t block,
 				 int page_size);
 void brelse(struct buffer_head *bh);
+
+int submit_bh(int is_write, struct buffer_head *bh);
+int write_dirty_buffer(struct buffer_head *bh);
 int bh_submit_read(struct buffer_head *bh);
 void wait_on_buffer(struct buffer_head *bh);
 

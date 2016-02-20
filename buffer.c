@@ -349,7 +349,6 @@ static signed char bdev_io_thread_read_notify(struct block_device *bdev)
 
 #endif
 
-
 static int sync_dirty_buffer(struct buffer_head *bh);
 static void detach_bh_from_freelist(struct buffer_head *bh);
 static void buffer_free(struct buffer_head *bh);
@@ -740,6 +739,22 @@ static int sync_dirty_buffer(struct buffer_head *bh)
 	return ret;
 }
 
+int write_dirty_buffer(struct buffer_head *bh)
+{
+	int ret = 0;
+
+	if (!trylock_buffer(bh))
+		return ret;
+
+	if (buffer_dirty(bh)) {
+		get_bh(bh);
+		bh->b_end_io = after_buffer_sync;
+		ret = submit_bh(WRITE, bh);
+	} else {
+		unlock_buffer(bh);
+	}
+	return ret;
+}
 
 struct buffer_head *__getblk(struct block_device *bdev, uint64_t block,
 			     int bsize)
