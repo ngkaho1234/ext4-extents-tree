@@ -20,13 +20,13 @@ static int inode_writeback(struct inode *inode)
 static void inode_free(struct inode *inode)
 {
 	inode_writeback(inode);
-	kfree(inode);
+	xfree(inode);
 }
 
 static struct inode *inode_alloc(struct super_block *sb)
 {
 	struct inode *inode;
-	inode = kzalloc(sizeof(struct inode), GFP_NOFS);
+	inode = xzalloc(sizeof(struct inode));
 	inode->i_sb = sb;
 	inode->i_generation = 0;
 	inode->i_data_dirty = 0;

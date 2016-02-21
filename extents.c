@@ -85,7 +85,7 @@ ext4_ext_alloc_path(struct inode *inode,
 	if (path) {
 		if (depth > path[0].p_maxdepth) {
 			ext4_ext_drop_refs(path, 0, 0);
-			kfree(path);
+			xfree(path);
 			*orig_path = NULL;
 		} else {
 			ext4_ext_drop_refs(path, 0, 0);
@@ -94,9 +94,8 @@ ext4_ext_alloc_path(struct inode *inode,
 	}
 
 	/* account possible depth increase */
-	path = kzalloc(sizeof(struct ext4_ext_path) *
-			(path_depth + 1),
-			GFP_NOFS);
+	path = xzalloc(sizeof(struct ext4_ext_path) *
+			(path_depth + 1));
 	if (!path)
 		return NULL;
 
@@ -107,7 +106,7 @@ ext4_ext_alloc_path(struct inode *inode,
 static void ext4_ext_free_path(struct ext4_ext_path *path, int discard)
 {
 	ext4_ext_drop_refs(path, 0, discard);
-	kfree(path);
+	xfree(path);
 }
 
 static inline void
@@ -117,7 +116,7 @@ ext4_ext_replace_path(struct ext4_ext_path *path,
 	ext4_ext_drop_refs(path, 0, 0);
 	memcpy(path, *npath,
 		sizeof(struct ext4_ext_path) * ((*npath)->p_depth + 1));
-	kfree(*npath);
+	xfree(*npath);
 	*npath = NULL;
 }
 
@@ -125,9 +124,8 @@ static struct ext4_ext_path *ext4_ext_dup_path(struct ext4_ext_path *path)
 {
 	struct ext4_ext_path *npath;
 	int i, depth = path->p_depth;
-	npath = kzalloc(sizeof(struct ext4_ext_path) *
-			(depth + 1),
-			GFP_NOFS);
+	npath = xzalloc(sizeof(struct ext4_ext_path) *
+			(depth + 1));
 	if (!npath)
 		return NULL;
 
@@ -619,7 +617,7 @@ static int ext4_ext_split_node(struct inode *inode,
 	int nblocks = depth - at + 1;
 
 	assert(at > 0);
-	newblocks = kzalloc(sizeof(ext4_fsblk_t) * nblocks, GFP_NOFS);
+	newblocks = xzalloc(sizeof(ext4_fsblk_t) * nblocks);
 	if (!newblocks) {
 		ret = -ENOMEM;
 		goto cleanup;
@@ -728,7 +726,7 @@ cleanup:
 
 		}
 	}
-	kfree(newblocks);
+	xfree(newblocks);
 	return ret;
 }
 

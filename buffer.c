@@ -260,8 +260,7 @@ struct block_device *bdev_alloc(int fd, int blocksize_bits)
 	struct block_device *bdev;
 	struct super_block *super;
 
-	bdev = kmalloc(sizeof(struct block_device) + sizeof(struct super_block),
-		       GFP_NOFS);
+	bdev = xmalloc(sizeof(struct block_device) + sizeof(struct super_block));
 	memset(bdev, 0,
 	       sizeof(struct block_device) + sizeof(struct super_block));
 	super = (struct super_block *)(bdev + 1);
@@ -394,7 +393,7 @@ void bdev_free(struct block_device *bdev)
 #endif
 	pthread_mutex_destroy(&bdev->bd_bh_root_lock);
 
-	kfree(bdev);
+	xfree(bdev);
 }
 
 
@@ -409,7 +408,7 @@ struct buffer_head *buffer_alloc(struct block_device *bdev, uint64_t block,
 				 int page_size)
 {
 	struct buffer_head *bh;
-	bh = kmalloc(sizeof(struct buffer_head) + page_size, GFP_NOFS);
+	bh = xmalloc(sizeof(struct buffer_head) + page_size);
 	if (!bh)
 		return NULL;
 
@@ -444,7 +443,7 @@ static void buffer_free(struct buffer_head *bh)
 	if (bh->b_count != 0)
 		fprintf(stderr, "bh: %p b_count != 0, my pid: %d", bh, getpid());
 
-	kfree(bh);
+	xfree(bh);
 }
 
 

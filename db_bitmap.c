@@ -20,17 +20,17 @@ struct db_bitmap *load_all_bitmap(struct super_block *sb, ext4_fsblk_t nrblocks,
 	int bitmap_nrblocks = blocks_of_bitmap(sb, nrblocks);
 	uint8_t *bitmap = NULL;
 	struct db_bitmap_desc *desc = NULL;
-	struct db_bitmap *db_bitmap = kzalloc(sizeof(struct db_bitmap), GFP_NOFS);
+	struct db_bitmap *db_bitmap = xzalloc(sizeof(struct db_bitmap));
 	if (!db_bitmap)
 		return NULL;
 
-	bitmap = kzalloc(bitmap_nrblocks << sb->s_blocksize_bits, GFP_NOFS);
+	bitmap = xzalloc(bitmap_nrblocks << sb->s_blocksize_bits);
 	if (!bitmap) {
-		kfree(db_bitmap);
+		xfree(db_bitmap);
 		return NULL;
 	}
 
-	desc = kzalloc(sizeof(struct db_bitmap_desc) * bitmap_nrblocks, GFP_NOFS);
+	desc = xzalloc(sizeof(struct db_bitmap_desc) * bitmap_nrblocks);
 
 	for (i = 0;i < bitmap_nrblocks;i++) {
 		struct buffer_head *bh;
@@ -45,11 +45,11 @@ struct db_bitmap *load_all_bitmap(struct super_block *sb, ext4_fsblk_t nrblocks,
 out:
 	if (err) {
 		if (db_bitmap)
-			kfree(db_bitmap);
+			xfree(db_bitmap);
 		if (bitmap)
-			kfree(bitmap);
+			xfree(bitmap);
 		if (desc)
-			kfree(desc);
+			xfree(desc);
 
 		db_bitmap = NULL;
 	} else {
@@ -64,9 +64,9 @@ out:
 
 void free_all_bitmap(struct db_bitmap *db_bitmap)
 {
-	kfree(db_bitmap->bitmap);
-	kfree(db_bitmap->bitmap_desc);
-	kfree(db_bitmap);
+	xfree(db_bitmap->bitmap);
+	xfree(db_bitmap->bitmap_desc);
+	xfree(db_bitmap);
 }
 
 void save_all_bitmap(struct super_block *sb, struct db_bitmap *db_bitmap)

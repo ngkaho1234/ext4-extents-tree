@@ -45,8 +45,6 @@
 #endif
 
 #define BITS_PER_LONG (__SIZEOF_LONG__ * 8)
-#define GFP_KERNEL 0
-#define GFP_NOFS 0
 
 #ifndef DISABLE_BACKTRACE
 #define MAX_BACKTRACE	16
@@ -224,18 +222,11 @@ static inline int test_bit(int nr, const volatile unsigned long *addr)
 #define round_down(x, y) ((x) & ~__round_mask(x, y))
 
 /*
- * printk
+ * xmalloc/xfree
  */
-#define printk(fmt, args...) fprintf(stderr, fmt, ##args)
-#define	KERN_CRIT	""
-#define KERN_ERR	""
-
-/*
- * kmalloc/kfree
- */
-#define kmalloc(x, y) malloc(x)
-#define kzalloc(x, y) calloc(1, x)
-#define kfree(x) { \
+#define xmalloc(x) malloc(x)
+#define xzalloc(x) calloc(1, x)
+#define xfree(x) { \
 	if (!x) \
 		printf("Warning, nil freeing. line: %d\n", __LINE__); \
 	if (x) \

@@ -7,7 +7,7 @@ struct db_handle *db_open(struct super_block *sb)
 	struct db_handle *db_handle;
 	struct db_bitmap *db_bitmap;
 	int err = 0;
-	db_handle = kzalloc(sizeof(struct db_handle), GFP_NOFS);
+	db_handle = xzalloc(sizeof(struct db_handle));
 	if (!db_handle)
 		return NULL;
 
@@ -31,7 +31,7 @@ out:
 		if (db_bitmap)
 			free_all_bitmap(db_bitmap);
 		if (db_handle)
-			kfree(db_handle);
+			xfree(db_handle);
 
 		db_handle = NULL;
 	}
@@ -43,5 +43,5 @@ void db_close(struct db_handle *db_handle)
 	save_all_bitmap(db_handle->sb, db_handle->db_bitmap);
 	free_all_bitmap(db_handle->db_bitmap);
 	fs_brelse(db_handle->sb_bh);
-	kfree(db_handle);
+	xfree(db_handle);
 }
