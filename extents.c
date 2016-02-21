@@ -72,7 +72,7 @@ static void ext4_ext_free_blocks(struct inode *inode,
 #define ext_debug printf
 #endif
 
-void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_other, int discard);
+void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_other);
 
 static struct ext4_ext_path *
 ext4_ext_alloc_path(struct inode *inode,
@@ -84,11 +84,11 @@ ext4_ext_alloc_path(struct inode *inode,
 
 	if (path) {
 		if (depth > path[0].p_maxdepth) {
-			ext4_ext_drop_refs(path, 0, 0);
+			ext4_ext_drop_refs(path, 0);
 			xfree(path);
 			*orig_path = NULL;
 		} else {
-			ext4_ext_drop_refs(path, 0, 0);
+			ext4_ext_drop_refs(path, 0);
 			return path;
 		}
 	}
@@ -103,9 +103,9 @@ ext4_ext_alloc_path(struct inode *inode,
 	return path;
 }
 
-static void ext4_ext_free_path(struct ext4_ext_path *path, int discard)
+static void ext4_ext_free_path(struct ext4_ext_path *path)
 {
-	ext4_ext_drop_refs(path, 0, discard);
+	ext4_ext_drop_refs(path, 0);
 	xfree(path);
 }
 
@@ -113,7 +113,7 @@ static inline void
 ext4_ext_replace_path(struct ext4_ext_path *path,
 		      struct ext4_ext_path **npath)
 {
-	ext4_ext_drop_refs(path, 0, 0);
+	ext4_ext_drop_refs(path, 0);
 	memcpy(path, *npath,
 		sizeof(struct ext4_ext_path) * ((*npath)->p_depth + 1));
 	xfree(*npath);
@@ -306,7 +306,7 @@ static int __ext4_ext_dirty(struct inode *inode,
 	return err;
 }
 
-void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_other, int discard)
+void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_other)
 {
 	int depth, i;
 
@@ -319,11 +319,7 @@ void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_other, int discard)
 
 	for (i = 0; i <= depth; i++, path++) {
 		if (path->p_bh) {
-			if (!discard)
-				fs_brelse(path->p_bh);
-			else
-				fs_bforget(path->p_bh);
-
+			fs_brelse(path->p_bh);
 			path->p_bh = NULL;
 		}
 	}
@@ -534,7 +530,7 @@ int ext4_find_extent(struct inode *inode, ext4_lblk_t block,
 	return ret;
 
 err:
-	ext4_ext_free_path(path, 1);
+	ext4_ext_free_path(path);
 	if (orig_path)
 		*orig_path = NULL;
 	return ret;
@@ -1065,7 +1061,7 @@ again:
 
 out:
 	if (npath)
-		ext4_ext_free_path(npath, ret ? 1 : 0);
+		ext4_ext_free_path(npath);
 
 	return ret;
 }
@@ -1162,7 +1158,7 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
 			if (err)
 				break;
 
-			ext4_ext_drop_refs(path + depth, 1, 0);
+			ext4_ext_drop_refs(path + depth, 1);
 		} else
 			break;
 
@@ -1330,7 +1326,7 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 				leaf_to = to;
 
 			ext4_ext_remove_leaf(inode, path, leaf_from, leaf_to);
-			ext4_ext_drop_refs(path + i, 0, 0);
+			ext4_ext_drop_refs(path + i, 0);
 			i--;
 			continue;
 		} else {
@@ -1339,7 +1335,7 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 			if (ext4_ext_more_to_rm(path + i, to)) {
 				struct buffer_head *bh;
 				if (path[i+1].p_bh)
-					ext4_ext_drop_refs(path + i + 1, 0, 0);
+					ext4_ext_drop_refs(path + i + 1, 0);
 
 				bh = read_extent_tree_block(inode,
 					ext4_idx_pblock(path[i].p_idx),
@@ -1389,7 +1385,7 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 	}
 
 out:
-	ext4_ext_free_path(path, ret ? 1 : 0);
+	ext4_ext_free_path(path);
 	path = NULL;
 	return ret;
 }
@@ -1674,7 +1670,7 @@ out:
 	bh_result->b_blocknr = newblock;
 out2:
 	if (path)
-		ext4_ext_free_path(path, err ? 1 : 0);
+		ext4_ext_free_path(path);
 
 	fs_stop_trans(inode->i_sb);
 
