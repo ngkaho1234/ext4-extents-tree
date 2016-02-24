@@ -109,35 +109,6 @@ static void ext4_ext_free_path(struct ext4_ext_path *path)
 	xfree(path);
 }
 
-static inline void
-ext4_ext_replace_path(struct ext4_ext_path *path,
-		      struct ext4_ext_path **npath)
-{
-	ext4_ext_drop_refs(path, 0);
-	memcpy(path, *npath,
-		sizeof(struct ext4_ext_path) * ((*npath)->p_depth + 1));
-	xfree(*npath);
-	*npath = NULL;
-}
-
-static struct ext4_ext_path *ext4_ext_dup_path(struct ext4_ext_path *path)
-{
-	struct ext4_ext_path *npath;
-	int i, depth = path->p_depth;
-	npath = xzalloc(sizeof(struct ext4_ext_path) *
-			(depth + 1));
-	if (!npath)
-		return NULL;
-
-	npath[0].p_maxdepth = depth;
-	memcpy(npath, path, sizeof(struct ext4_ext_path) * (depth + 1));
-	for (i = 0;i <= depth;i++) {
-		if (npath[i].p_bh)
-			get_bh(npath[i].p_bh);
-	}
-	return npath;
-}
-
 static inline int ext4_ext_space_block(struct inode *inode, int check)
 {
 	int size;
@@ -1008,7 +979,6 @@ int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, st
 {
 	int depth, level, ret = 0;
 	struct ext4_ext_path *path = *ppath;
-	struct ext4_ext_path *npath = NULL;
 
 again:
 	depth = ext_depth(inode);
@@ -1044,25 +1014,16 @@ again:
 
 		/* We split from leaf to the i-th node */
 		if (level > 0) {
-			npath = ext4_ext_dup_path(path);
-			if (!npath) {
-				ret = -ENOMEM;
-				goto out;
-			}
-			ret = ext4_ext_split_node(inode, npath, i,
+			ret = ext4_ext_split_node(inode, path, i,
 						  newext);
 			if (ret)
 				goto out;
 
-			ext4_ext_replace_path(path, &npath);
 		}
 		goto again;
 	}
 
 out:
-	if (npath)
-		ext4_ext_free_path(npath);
-
 	return ret;
 }
 
