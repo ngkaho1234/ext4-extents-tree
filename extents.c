@@ -693,7 +693,9 @@ cleanup:
 
 		}
 	}
-	xfree(newblocks);
+	if (newblocks)
+		xfree(newblocks);
+
 	return ret;
 }
 
