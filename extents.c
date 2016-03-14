@@ -1149,6 +1149,7 @@ int ext4_ext_truncate(struct inode *inode,
 	int depth = ext_depth(inode), ret = -EIO;
 	struct ext4_extent *ex;
 	struct ext4_ext_path *path = NULL;
+	ext4_lblk_t now = from;
 
 	if (to < from)
 		return -EINVAL;
@@ -1193,7 +1194,9 @@ int ext4_ext_truncate(struct inode *inode,
 		ret = ext4_ext_insert_extent(inode, &path, &newex, 0);
 		goto out;
 	}
-	while (ex && ext4_ext_lblock(ex) <= to) {
+	while (ex &&
+	       ext4_ext_lblock(ex) + ext4_ext_get_actual_len(ex) - 1 >= now &&
+	       ext4_ext_lblock(ex) <= to) {
 		int len, new_len = 0;
 		int unwritten;
 		ext4_lblk_t start, new_start;
@@ -1215,6 +1218,7 @@ int ext4_ext_truncate(struct inode *inode,
 			}
 		}
 
+		now += len;
 		if (!new_len) {
 			ret = ext4_ext_remove_extent(inode, path);
 			if (ret)
@@ -1232,12 +1236,15 @@ int ext4_ext_truncate(struct inode *inode,
 
 			__ext4_ext_dirty(inode, path + depth);
 		}
-		ret = ext4_find_extent(inode, from, &path, 0);
+		ret = ext4_find_extent(inode, now, &path, 0);
 		if (ret)
 			goto out;
 
 		depth = ext_depth(inode);
 		ex = path[depth].p_ext;
+		if (ex && ext4_ext_lblock(ex) > now)
+			now = ext4_ext_lblock(ex);
+
 	}
 out:
 	if (path)
