@@ -1143,6 +1143,44 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
 	return err;
 }
 
+/*
+ * ext4_ext_next_allocated_block:
+ * returns allocated block in subsequent extent or EXT_MAX_BLOCKS.
+ * NOTE: it considers block number from index entry as
+ * allocated block. Thus, index entries have to be consistent
+ * with leaves.
+ */
+#define EXT_MAX_BLOCKS (ext4_lblk_t)-1
+
+ext4_lblk_t
+ext4_ext_next_allocated_block(struct ext4_ext_path *path)
+{
+	int depth;
+
+	depth = path->p_depth;
+
+	if (depth == 0 && path->p_ext == NULL)
+		return EXT_MAX_BLOCKS;
+
+	while (depth >= 0) {
+		if (depth == path->p_depth) {
+			/* leaf */
+			if (path[depth].p_ext &&
+				path[depth].p_ext !=
+					EXT_LAST_EXTENT(path[depth].p_hdr))
+			  return ext4_ext_lblock(&path[depth].p_ext[1]);
+		} else {
+			/* index */
+			if (path[depth].p_idx !=
+					EXT_LAST_INDEX(path[depth].p_hdr))
+			  return ext4_idx_lblock(&path[depth].p_idx[1]);
+		}
+		depth--;
+	}
+
+	return EXT_MAX_BLOCKS;
+}
+
 int ext4_ext_truncate(struct inode *inode,
 		      ext4_lblk_t from, ext4_lblk_t to)
 {
@@ -1194,6 +1232,14 @@ int ext4_ext_truncate(struct inode *inode,
 		ret = ext4_ext_insert_extent(inode, &path, &newex, 0);
 		goto out;
 	}
+	if (ext4_ext_lblock(ex) + ext4_ext_get_actual_len(ex) - 1 < from) {
+		now = ext4_ext_next_allocated_block(path);
+		ret = ext4_find_extent(inode, now, &path, 0);
+		if (ret)
+			goto out;
+
+		ex = path[depth].p_ext;
+	}
 	while (ex &&
 	       ext4_ext_lblock(ex) + ext4_ext_get_actual_len(ex) - 1 >= now &&
 	       ext4_ext_lblock(ex) <= to) {
@@ -1218,7 +1264,7 @@ int ext4_ext_truncate(struct inode *inode,
 			}
 		}
 
-		now += len;
+		now = ext4_ext_next_allocated_block(path);
 		if (!new_len) {
 			ret = ext4_ext_remove_extent(inode, path);
 			if (ret)
@@ -1242,9 +1288,6 @@ int ext4_ext_truncate(struct inode *inode,
 
 		depth = ext_depth(inode);
 		ex = path[depth].p_ext;
-		if (ex && ext4_ext_lblock(ex) > now)
-			now = ext4_ext_lblock(ex);
-
 	}
 out:
 	if (path)
@@ -1356,44 +1399,6 @@ int ext4_ext_tree_init(void *v, struct inode *inode)
 	eh->eh_max = cpu_to_le16(ext4_ext_space_root(inode, 0));
 	ext4_mark_inode_dirty(inode);
 	return 0;
-}
-
-/*
- * ext4_ext_next_allocated_block:
- * returns allocated block in subsequent extent or EXT_MAX_BLOCKS.
- * NOTE: it considers block number from index entry as
- * allocated block. Thus, index entries have to be consistent
- * with leaves.
- */
-#define EXT_MAX_BLOCKS (ext4_lblk_t)-1
-
-ext4_lblk_t
-ext4_ext_next_allocated_block(struct ext4_ext_path *path)
-{
-	int depth;
-
-	depth = path->p_depth;
-
-	if (depth == 0 && path->p_ext == NULL)
-		return EXT_MAX_BLOCKS;
-
-	while (depth >= 0) {
-		if (depth == path->p_depth) {
-			/* leaf */
-			if (path[depth].p_ext &&
-				path[depth].p_ext !=
-					EXT_LAST_EXTENT(path[depth].p_hdr))
-			  return ext4_ext_lblock(&path[depth].p_ext[1]);
-		} else {
-			/* index */
-			if (path[depth].p_idx !=
-					EXT_LAST_INDEX(path[depth].p_hdr))
-			  return ext4_idx_lblock(&path[depth].p_idx[1]);
-		}
-		depth--;
-	}
-
-	return EXT_MAX_BLOCKS;
 }
 
 static int ext4_ext_zero_unwritten_range(struct inode *inode,
