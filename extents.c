@@ -1128,125 +1128,50 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
 		depth--;
 	}
 
-	return err;
-}
-
-static int ext4_ext_remove_leaf(struct inode *inode, struct ext4_ext_path *path, ext4_lblk_t from, ext4_lblk_t to)
-{
-	
-	int depth = ext_depth(inode);
-	struct ext4_extent *ex = path[depth].p_ext;
-	struct ext4_extent *start_ex, *ex2 = NULL;
-	struct ext4_extent_header *eh = path[depth].p_hdr;
-	int len, err = 0;
-	uint16_t new_entries;
-
-	start_ex = ex;
-	new_entries = le16_to_cpu(eh->eh_entries);
-	while (ex <= EXT_LAST_EXTENT(path[depth].p_hdr)
-		&& ext4_ext_lblock(ex) <= to) {
-		int new_len = 0;
-		int unwritten;
-		ext4_lblk_t start, new_start;
-		ext4_fsblk_t newblock;
-		new_start = start = ext4_ext_lblock(ex);
-		len = ext4_ext_get_actual_len(ex);
-		newblock = ext4_ext_pblock(ex);
-		if (start < from) {
-			len -= from - start;
-			new_len = from - start;
-			start = from;
-			start_ex++;
-		} else {
-			if (start + len - 1 > to) {
-				len -= start + len - 1 - to;
-				new_len = start + len - 1 - to;
-				new_start = to + 1;
-				newblock += to + 1 - start;
-				ex2 = ex;
-			}
-		}
-
-		ext4_ext_remove_blocks(inode, ex, start, start + len - 1);
-		ext4_ext_store_lblock(ex, new_start);
-		if (!new_len)
-			new_entries--;
-		else {
-			unwritten = ext4_ext_is_unwritten(ex);
-			ex->ee_len = cpu_to_le16(new_len);
-			ext4_ext_store_pblock(ex, newblock);
-			if (unwritten)
-				ext4_ext_mark_unwritten(ex);
-
-		}
-
-		ex += 1;
+	/* TODO: flexible tree reduction should be here */
+	if (path->p_hdr->eh_entries == 0) {
+		/*
+		 * truncate to zero freed all the tree,
+		 * so we need to correct eh_depth
+		 */
+		ext_inode_hdr(inode)->eh_depth = 0;
+		ext_inode_hdr(inode)->eh_max =
+			cpu_to_le16(ext4_ext_space_root(inode, 0));
+		err = __ext4_ext_dirty(inode, path);
 	}
-
-	if (ex2 == NULL)
-		ex2 = ex;
-
-	if (ex2 <= EXT_LAST_EXTENT(eh))
-		memmove(start_ex, ex2,
-			(EXT_LAST_EXTENT(eh) - ex2 + 1) * sizeof(struct ext4_extent));
-
-	eh->eh_entries = cpu_to_le16(new_entries);
-	__ext4_ext_dirty(inode, path + depth);
-	if (path[depth].p_ext == EXT_FIRST_EXTENT(eh)
-		&& eh->eh_entries) {
-		err = ext4_ext_correct_indexes(inode, path);
-		if (err)
-			return err;
-	}
-
-	/* if this leaf is free, then we should
-	 * remove it from index block above */
-	if (eh->eh_entries == 0 && path[depth].p_bh != NULL)
-		err = ext4_ext_remove_idx(inode, path, depth - 1);
-	else
-		if (depth > 0)
-			path[depth - 1].p_idx++;
 
 	return err;
 }
 
-static inline int
-ext4_ext_more_to_rm(struct ext4_ext_path *path, ext4_lblk_t to)
+int ext4_ext_truncate(struct inode *inode,
+		      ext4_lblk_t from, ext4_lblk_t to)
 {
-	if (!le16_to_cpu(path->p_hdr->eh_entries))
-		return 0;
-
-	if (path->p_idx > EXT_LAST_INDEX(path->p_hdr))
-		return 0;
-
-	if (ext4_idx_lblock(path->p_idx) > to)
-		return 0;
-
-	return 1;
-}
-
-int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
-{
+	int depth = ext_depth(inode), ret = -EIO;
+	struct ext4_extent *ex;
 	struct ext4_ext_path *path = NULL;
-	int ret, depth = ext_depth(inode), i;
+
+	if (to < from)
+		return -EINVAL;
 
 	ret = ext4_find_extent(inode, from, &path, 0);
-	if (ret)
+	if (ret < 0)
 		goto out;
 
-	if (!path[depth].p_ext ||
-		!in_range(from, ext4_ext_lblock(path[depth].p_ext),
-			 ext4_ext_get_actual_len(path[depth].p_ext))) {
+	ex = path[depth].p_ext;
+	if (!ex)
+		goto out;
+
+	if (from < ext4_ext_lblock(ex) &&
+	    to < ext4_ext_lblock(ex)) {
 		ret = 0;
 		goto out;
 	}
-
 	/* If we do remove_space inside the range of an extent */
-	if ((ext4_ext_lblock(path[depth].p_ext) < from) &&
-	    (to < ext4_ext_lblock(path[depth].p_ext) +
-			ext4_ext_get_actual_len(path[depth].p_ext) - 1)) {
+	if ((ext4_ext_lblock(ex) < from) &&
+	    (to < ext4_ext_lblock(ex) +
+			ext4_ext_get_actual_len(ex) - 1)) {
 
-		struct ext4_extent *ex = path[depth].p_ext, newex;
+		struct ext4_extent newex;
 		int unwritten = ext4_ext_is_unwritten(ex);
 		ext4_lblk_t ee_block = ext4_ext_lblock(ex);
 		int32_t len = ext4_ext_get_actual_len(ex);
@@ -1268,88 +1193,56 @@ int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t from, ext4_lblk_t to)
 		ret = ext4_ext_insert_extent(inode, &path, &newex, 0);
 		goto out;
 	}
+	while (ex && ext4_ext_lblock(ex) <= to) {
+		int len, new_len = 0;
+		int unwritten;
+		ext4_lblk_t start, new_start;
+		ext4_fsblk_t newblock;
 
-	i = depth;
-	while (i >= 0) {
-		if (i == depth) {
-			struct ext4_extent_header *eh;
-			struct ext4_extent *first_ex, *last_ex;
-			ext4_lblk_t leaf_from, leaf_to;
-			eh = path[i].p_hdr;
-			assert(le16_to_cpu(eh->eh_entries) > 0);
-			first_ex = EXT_FIRST_EXTENT(eh);
-			last_ex = EXT_LAST_EXTENT(eh);
-			leaf_from = ext4_ext_lblock(first_ex);
-			leaf_to = ext4_ext_lblock(last_ex)
-				   + ext4_ext_get_actual_len(last_ex) - 1;
-			if (leaf_from < from)
-				leaf_from = from;
-
-			if (leaf_to > to)
-				leaf_to = to;
-
-			ext4_ext_remove_leaf(inode, path, leaf_from, leaf_to);
-			ext4_ext_drop_refs(path + i, 0);
-			i--;
-			continue;
+		new_start = start = ext4_ext_lblock(ex);
+		len = ext4_ext_get_actual_len(ex);
+		newblock = ext4_ext_pblock(ex);
+		if (start < from) {
+			len -= from - start;
+			new_len = from - start;
+			start = from;
 		} else {
-			struct ext4_extent_header *eh;
-			eh = path[i].p_hdr;
-			if (ext4_ext_more_to_rm(path + i, to)) {
-				struct buffer_head *bh;
-				if (path[i+1].p_bh)
-					ext4_ext_drop_refs(path + i + 1, 0);
-
-				bh = read_extent_tree_block(inode,
-					ext4_idx_pblock(path[i].p_idx),
-					depth - i - 1, &ret, 0);
-				if (ret)
-					goto out;
-
-				path[i].p_block = ext4_idx_pblock(path[i].p_idx);
-				path[i+1].p_bh = bh;
-				path[i+1].p_hdr = ext_block_hdr(bh);
-				path[i+1].p_depth = depth - i - 1;
-				if (i + 1 == depth)
-					path[i+1].p_ext = EXT_FIRST_EXTENT(path[i+1].p_hdr);
-				else
-					path[i+1].p_idx = EXT_FIRST_INDEX(path[i+1].p_hdr);
-
-				i++;
-			} else {
-				if (i > 0) {
-					if (!le16_to_cpu(eh->eh_entries)) {
-						
-						ret = ext4_ext_remove_idx(inode, path, i - 1);
-					} else
-						path[i - 1].p_idx++;
-
-				}
-
-				if (i) {
-					fs_brelse(path[i].p_bh);
-					path[i].p_bh = NULL;
-				}
-				i--;
+			if (start + len - 1 > to) {
+				new_len = start + len - 1 - to;
+				len -= new_len;
+				new_start = to + 1;
+				newblock += to + 1 - start;
 			}
 		}
-	}
 
-	/* TODO: flexible tree reduction should be here */
-	if (path->p_hdr->eh_entries == 0) {
-		/*
-		 * truncate to zero freed all the tree,
-		 * so we need to correct eh_depth
-		 */
-		ext_inode_hdr(inode)->eh_depth = 0;
-		ext_inode_hdr(inode)->eh_max =
-			cpu_to_le16(ext4_ext_space_root(inode, 0));
-		ret = __ext4_ext_dirty(inode, path);
-	}
+		if (!new_len) {
+			ret = ext4_ext_remove_extent(inode, path);
+			if (ret)
+				goto out;
 
+		} else {
+			ext4_ext_remove_blocks(inode,
+				ex, start, start + len - 1);
+			ext4_ext_store_lblock(ex, new_start);
+			unwritten = ext4_ext_is_unwritten(ex);
+			ex->ee_len = cpu_to_le16(new_len);
+			ext4_ext_store_pblock(ex, newblock);
+			if (unwritten)
+				ext4_ext_mark_unwritten(ex);
+
+			__ext4_ext_dirty(inode, path + depth);
+		}
+		ret = ext4_find_extent(inode, from, &path, 0);
+		if (ret)
+			goto out;
+
+		depth = ext_depth(inode);
+		ex = path[depth].p_ext;
+	}
 out:
-	ext4_ext_free_path(path);
-	path = NULL;
+	if (path)
+		ext4_ext_free_path(path);
+
 	return ret;
 }
 

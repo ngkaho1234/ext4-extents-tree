@@ -300,7 +300,7 @@ void ext4_ext_init(struct super_block *sb);
 
 int ext4_ext_tree_init(void *handle, struct inode *inode);
 
-int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t start,
-			  ext4_lblk_t end);
+int ext4_ext_truncate(struct inode *inode, ext4_lblk_t from,
+			  ext4_lblk_t to);
 
 #endif /* _NEW_BTREE_H */

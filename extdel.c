@@ -107,7 +107,7 @@ int main(int argc, char **argv)
 
 	inode = open_ext4_db(argv[1]);
 	a = clock();
-	err = ext4_ext_remove_space(inode, from, to);
+	err = ext4_ext_truncate(inode, from, to);
 	b = clock();
 	fprintf(stderr, "err: %s, clock: %ld\n", strerror(-err), (b - a)/CLOCKS_PER_SEC);
 	free_ext4_db(inode);
