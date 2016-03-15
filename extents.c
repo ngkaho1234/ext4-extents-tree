@@ -1063,18 +1063,6 @@ static int ext4_ext_remove_idx(struct inode *inode, struct ext4_ext_path *path, 
 	ext_debug("IDX: Freeing %" PRIu32 " at %" PRIu64 ", %d\n",
 		ext4_idx_lblock(path[i].p_idx), leaf, 1);
 	ext4_ext_free_blocks(inode, leaf, 1, 0);
-
-	while (i > 0) {
-		if (path[i].p_idx != EXT_FIRST_INDEX(path[i].p_hdr))
-			break;
-
-		path[i-1].p_idx->ei_block = path[i].p_idx->ei_block;
-		err = __ext4_ext_dirty(inode, path + i - 1);
-		if (err)
-			break;
-
-		i--;
-	}
 	return err;
 }
 
@@ -1112,9 +1100,12 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
 			return err;
 	}
 
-	/* if the node is free, then we should
-	 * remove it from index block above */
-	while (depth) {
+	/*
+	 * If the node is free, then we should
+	 * remove it from index block above.
+	 * Also, we adjust the indexes of nodes properly.
+	 */
+	while (depth > 0) {
 		eh = path[depth].p_hdr;
 		if (eh->eh_entries == 0 && path[depth].p_bh != NULL) {
 			err = ext4_ext_remove_idx(inode, path, depth - 1);
@@ -1122,9 +1113,18 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
 				break;
 
 			ext4_ext_drop_refs(path + depth, 1);
-		} else
-			break;
+		} else {
+			/* Correct the modified indexes. */
 
+			if (path[depth].p_idx != EXT_FIRST_INDEX(path[depth].p_hdr))
+				break;
+
+			path[depth-1].p_idx->ei_block = path[depth].p_idx->ei_block;
+			err = __ext4_ext_dirty(inode, path + depth - 1);
+			if (err)
+				break;
+
+		}
 		depth--;
 	}
 
