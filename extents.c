@@ -701,11 +701,13 @@ cleanup:
 
 /*
  * ext4_ext_correct_indexes:
- * if leaf gets modified and modified extent is first in the leaf,
+ * if leaf/node gets modified and modified extent/index
+ * is first in the leaf/node,
  * then we have to correct all indexes above.
  */
 static int ext4_ext_correct_indexes(struct inode *inode,
-				    struct ext4_ext_path *path)
+				    struct ext4_ext_path *path,
+				    int at)
 {
 	struct ext4_extent_header *eh;
 	int depth = ext_depth(inode);
@@ -713,37 +715,47 @@ static int ext4_ext_correct_indexes(struct inode *inode,
 	__le32 border;
 	int k, err = 0;
 
-	eh = path[depth].p_hdr;
-	ex = path[depth].p_ext;
-
-	if (ex == NULL || eh == NULL)
-		return -EIO;
-
-	if (depth == 0) {
-		/* there is no tree at all */
+	assert(at >= 0);
+	if (!at)
 		return 0;
-	}
 
-	if (ex != EXT_FIRST_EXTENT(eh)) {
-		/* we correct tree if first leaf got modified only */
-		return 0;
-	}
+	if (depth == at) {
+		eh = path[at].p_hdr;
+		ex = path[at].p_ext;
 
-	k = depth - 1;
-	border = path[depth].p_ext->ee_block;
-	path[k].p_idx->ei_block = border;
-	err = __ext4_ext_dirty(inode, path + k);
-	if (err)
-		return err;
+		if (ex == NULL || eh == NULL)
+			return -EIO;
 
-	while (k--) {
-		/* change all left-side indexes */
-		if (path[k+1].p_idx != EXT_FIRST_INDEX(path[k+1].p_hdr))
-			break;
+		if (at == 0) {
+			/* there is no tree at all */
+			return 0;
+		}
+
+		if (ex != EXT_FIRST_EXTENT(eh)) {
+			/* we correct tree if first leaf got modified only */
+			return 0;
+		}
+
+		k = at - 1;
+		border = path[at].p_ext->ee_block;
 		path[k].p_idx->ei_block = border;
 		err = __ext4_ext_dirty(inode, path + k);
 		if (err)
+			return err;
+
+	} else
+		k = at;
+
+	while (k) {
+		/* change all left-side indexes */
+		if (path[k].p_idx != EXT_FIRST_INDEX(path[k].p_hdr))
 			break;
+		path[k-1].p_idx->ei_block = border;
+		err = __ext4_ext_dirty(inode, path + k-1);
+		if (err)
+			break;
+
+		k--;
 	}
 
 	return err;
@@ -880,7 +892,7 @@ static int ext4_ext_insert_leaf(struct inode *inode,
 		goto out;
 	}
 
-	err = ext4_ext_correct_indexes(inode, path);
+	err = ext4_ext_correct_indexes(inode, path, at);
 	if (err)
 		goto out;
 	err = __ext4_ext_dirty(inode, curp);
@@ -1093,17 +1105,10 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
 	eh->eh_entries = cpu_to_le16(new_entries);
 
 	__ext4_ext_dirty(inode, path + depth);
-	if (path[depth].p_ext == EXT_FIRST_EXTENT(eh)
-		&& eh->eh_entries) {
-		err = ext4_ext_correct_indexes(inode, path);
-		if (err)
-			return err;
-	}
 
 	/*
 	 * If the node is free, then we should
 	 * remove it from index block above.
-	 * Also, we adjust the indexes of nodes properly.
 	 */
 	while (depth > 0) {
 		eh = path[depth].p_hdr;
@@ -1113,20 +1118,12 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
 				break;
 
 			ext4_ext_drop_refs(path + depth, 1);
-		} else {
-			/* Correct the modified indexes. */
+		} else
+			break;
 
-			if (path[depth].p_idx != EXT_FIRST_INDEX(path[depth].p_hdr))
-				break;
-
-			path[depth-1].p_idx->ei_block = path[depth].p_idx->ei_block;
-			err = __ext4_ext_dirty(inode, path + depth - 1);
-			if (err)
-				break;
-
-		}
 		depth--;
 	}
+	err = ext4_ext_correct_indexes(inode, path, depth);
 
 	/* TODO: flexible tree reduction should be here */
 	if (path->p_hdr->eh_entries == 0) {
