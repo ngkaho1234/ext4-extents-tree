@@ -1162,7 +1162,7 @@ static void ext4_ext_remove_blocks(struct inode *inode, struct ext4_extent *ex,
 	ext4_fsblk_t start;
 	num = from - ext4_ext_lblock(ex);
 	start = ext4_ext_pblock(ex) + num;
-	ext_debug("Freeing %" PRIu32 " at %" PRIu64 ", %d\n", from, start, len);
+	ext_debug("Freeing %" PRIu64 " at %" PRIu64 ", %d\n", from, start, len);
 	ext4_ext_free_blocks(inode, start, len, 0);
 }
 
@@ -1185,7 +1185,7 @@ static int ext4_ext_remove_idx(struct inode *inode, struct ext4_ext_path *path, 
 	if (err)
 		return err;
 
-	ext_debug("IDX: Freeing %" PRIu32 " at %" PRIu64 ", %d\n",
+	ext_debug("IDX: Freeing %" PRIu64 " at %" PRIu64 ", %d\n",
 		ext4_idx_lblock(path[i].p_idx), leaf, 1);
 	ext4_ext_free_blocks(inode, leaf, 1, 0);
 	return err;

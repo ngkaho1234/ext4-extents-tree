@@ -73,10 +73,9 @@ struct ext4_extent_tail
  */
 struct ext4_extent
 {
-	uint32_t ee_block;    /* first logical block extent covers */
-	uint16_t ee_len;      /* number of blocks covered by extent */
-	uint16_t ee_start_hi; /* high 16 bits of physical block */
-	uint32_t ee_start_lo; /* low 32 bits of physical block */
+	uint64_t ee_block;    /* first logical block extent covers */
+	uint32_t ee_len;      /* number of blocks covered by extent */
+	uint64_t ee_start; /* physical block */
 };
 
 /*
@@ -85,12 +84,10 @@ struct ext4_extent
  */
 struct ext4_extent_idx
 {
-	uint32_t ei_block;   /* index covers logical blocks from 'block' */
-	uint32_t ei_leaf_lo; /* pointer to the physical block of the next *
+	uint64_t ei_block;   /* index covers logical blocks from 'block' */
+	uint64_t ei_leaf; /* pointer to the physical block of the next *
 					       * level. leaf or next index could
 			      * be there */
-	uint16_t ei_leaf_hi; /* high 16 bits of physical block */
-	uint16_t ei_unused;
 };
 
 /*
@@ -140,7 +137,7 @@ struct ext4_ext_path
 
 /*
  * EXT_INIT_MAX_LEN is the maximum number of blocks we can have in an
- * initialized extent. This is 2^15 and not (2^16 - 1), since we use the
+ * initialized extent. This is 2^31 and not (2^32 - 1), since we use the
  * MSB of ee_len field in the extent datastructure to signify if this
  * particular extent is an initialized extent or an uninitialized (i.e.
  * preallocated).
@@ -155,7 +152,7 @@ struct ext4_ext_path
  * Hence, the maximum number of blocks we can have in an *initialized*
  * extent is 2^15 (32768) and in an *uninitialized* extent is 2^15-1 (32767).
  */
-#define EXT_INIT_MAX_LEN (1 << 15)
+#define EXT_INIT_MAX_LEN (1 << 31)
 #define EXT_UNWRITTEN_MAX_LEN	(EXT_INIT_MAX_LEN - 1)
 
 #define EXT_EXTENT_SIZE sizeof(struct ext4_extent)
@@ -195,35 +192,35 @@ static inline uint16_t ext_depth(struct inode *inode)
 
 static inline uint16_t ext4_ext_get_actual_len(struct ext4_extent *ext)
 {
-	return (le16_to_cpu(ext->ee_len) <= EXT_INIT_MAX_LEN ?
-		le16_to_cpu(ext->ee_len) :
-		(le16_to_cpu(ext->ee_len) - EXT_INIT_MAX_LEN));
+	return (le32_to_cpu(ext->ee_len) <= EXT_INIT_MAX_LEN ?
+		le32_to_cpu(ext->ee_len) :
+		(le32_to_cpu(ext->ee_len) - EXT_INIT_MAX_LEN));
 }
 
 static inline void ext4_ext_mark_initialized(struct ext4_extent *ext)
 {
-	ext->ee_len = cpu_to_le16(ext4_ext_get_actual_len(ext));
+	ext->ee_len = cpu_to_le32(ext4_ext_get_actual_len(ext));
 }
 
 static inline void ext4_ext_mark_unwritten(struct ext4_extent *ext)
 {
-	ext->ee_len |= cpu_to_le16(EXT_INIT_MAX_LEN);
+	ext->ee_len |= cpu_to_le32(EXT_INIT_MAX_LEN);
 }
 
 static inline int ext4_ext_is_unwritten(struct ext4_extent *ext)
 {
 	/* Extent with ee_len of 0x8000 is treated as an initialized extent */
-	return (le16_to_cpu(ext->ee_len) > EXT_INIT_MAX_LEN);
+	return (le32_to_cpu(ext->ee_len) > EXT_INIT_MAX_LEN);
 }
 
 static inline ext4_lblk_t ext4_ext_lblock(struct ext4_extent *ex)
 {
-	return le32_to_cpu(ex->ee_block);
+	return le64_to_cpu(ex->ee_block);
 }
 
 static inline ext4_lblk_t ext4_idx_lblock(struct ext4_extent_idx *ix)
 {
-	return le32_to_cpu(ix->ei_block);
+	return le64_to_cpu(ix->ei_block);
 }
 
 /*
@@ -232,11 +229,7 @@ static inline ext4_lblk_t ext4_idx_lblock(struct ext4_extent_idx *ix)
  */
 static inline ext4_fsblk_t ext4_ext_pblock(struct ext4_extent *ex)
 {
-	ext4_fsblk_t block;
-
-	block = ex->ee_start_lo;
-	block |= ((ext4_fsblk_t)ex->ee_start_hi << 31) << 1;
-	return block;
+	return le64_to_cpu(ex->ee_start);
 }
 
 /*
@@ -245,23 +238,19 @@ static inline ext4_fsblk_t ext4_ext_pblock(struct ext4_extent *ex)
  */
 static inline ext4_fsblk_t ext4_idx_pblock(struct ext4_extent_idx *ix)
 {
-	ext4_fsblk_t block;
-
-	block = ix->ei_leaf_lo;
-	block |= ((ext4_fsblk_t)ix->ei_leaf_hi << 31) << 1;
-	return block;
+	return le64_to_cpu(ix->ei_leaf);
 }
 
 static inline void ext4_ext_store_lblock(struct ext4_extent *ex,
 				       ext4_lblk_t lblk)
 {
-	ex->ee_block = cpu_to_le32(lblk);
+	ex->ee_block = cpu_to_le64(lblk);
 }
 
 static inline void ext4_idx_store_lblock(struct ext4_extent_idx *ix,
 				       ext4_lblk_t lblk)
 {
-	ix->ei_block = cpu_to_le32(lblk);
+	ix->ei_block = cpu_to_le64(lblk);
 }
 
 /*
@@ -272,8 +261,7 @@ static inline void ext4_idx_store_lblock(struct ext4_extent_idx *ix,
 static inline void ext4_ext_store_pblock(struct ext4_extent *ex,
 					 ext4_fsblk_t pb)
 {
-	ex->ee_start_lo = (unsigned long)(pb & 0xffffffff);
-	ex->ee_start_hi = (unsigned long)((pb >> 31) >> 1) & 0xffff;
+	ex->ee_start = cpu_to_le64(pb);
 }
 
 /*
@@ -284,8 +272,7 @@ static inline void ext4_ext_store_pblock(struct ext4_extent *ex,
 static inline void ext4_idx_store_pblock(struct ext4_extent_idx *ix,
 					 ext4_fsblk_t pb)
 {
-	ix->ei_leaf_lo = (unsigned long)(pb & 0xffffffff);
-	ix->ei_leaf_hi = (unsigned long)((pb >> 31) >> 1) & 0xffff;
+	ix->ei_leaf = cpu_to_le64(pb);
 }
 
 #define ext4_ext_dirty(handle, inode, path)                                           \

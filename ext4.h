@@ -10,7 +10,7 @@
 /*
  * Types of integer.
  */
-typedef uint32_t ext4_lblk_t;
+typedef uint64_t ext4_lblk_t;
 typedef uint64_t ext4_fsblk_t;
 
 
@@ -27,8 +27,8 @@ struct inode {
 	int	 i_ino;
 	uint64_t i_size;
 	union {
-		uint32_t i_data[15];
-		uint32_t i_block[15];
+		uint32_t i_data[23];
+		uint32_t i_block[23];
 	};
 	int	 i_data_dirty:1;
 	int (*i_writeback)(struct inode *inode);
