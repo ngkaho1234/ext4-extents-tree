@@ -512,7 +512,7 @@ static void ext4_ext_init_header(struct inode *inode, struct ext4_extent_header 
 	eh->eh_entries = 0;
 	eh->eh_max = cpu_to_le16(ext4_ext_max_entries(inode, depth, 0));
 	eh->eh_magic = cpu_to_le16(EXT4_EXT_MAGIC);
-	eh->eh_depth = depth;
+	eh->eh_depth = cpu_to_le16(depth);
 }
 
 static int ext4_ext_insert_index(struct inode *inode,
