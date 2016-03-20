@@ -1161,11 +1161,11 @@ static int ext4_ext_amalgamate(struct inode *inode, struct ext4_ext_path *path,
 	while (depth > 0) {
 		struct ext4_extent_header *eh = right_path[depth].p_hdr;
 		if (eh->eh_entries == 0 && right_path[depth].p_bh != NULL) {
+			ext4_ext_drop_refs(right_path + depth, 1);
 			ret = ext4_ext_remove_idx(inode, right_path, depth - 1);
 			if (ret)
 				goto out;
 
-			ext4_ext_drop_refs(right_path + depth, 1);
 		} else
 			break;
 
@@ -1231,11 +1231,11 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
 	while (depth > 0) {
 		eh = path[depth].p_hdr;
 		if (eh->eh_entries == 0 && path[depth].p_bh != NULL) {
+			ext4_ext_drop_refs(path + depth, 1);
 			err = ext4_ext_remove_idx(inode, path, depth - 1);
 			if (err)
 				break;
 
-			ext4_ext_drop_refs(path + depth, 1);
 		} else
 			break;
 
