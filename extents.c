@@ -72,7 +72,7 @@ static void ext4_ext_free_blocks(struct inode *inode,
 #define ext_debug printf
 #endif
 
-void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_other);
+void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_below);
 
 static struct ext4_ext_path *
 ext4_ext_alloc_path(struct inode *inode,
@@ -277,13 +277,13 @@ static int __ext4_ext_dirty(struct inode *inode,
 	return err;
 }
 
-void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_other)
+void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_below)
 {
 	int depth, i;
 
 	if (!path)
 		return;
-	if (keep_other)
+	if (keep_below)
 		depth = 0;
 	else
 		depth = path->p_depth;
@@ -514,6 +514,41 @@ static void ext4_ext_init_header(struct inode *inode, struct ext4_extent_header 
 	eh->eh_magic = cpu_to_le16(EXT4_EXT_MAGIC);
 	eh->eh_depth = cpu_to_le16(depth);
 }
+
+/*
+ * ext4_ext_next_allocated_block:
+ * returns allocated block in subsequent extent or EXT_MAX_BLOCKS.
+ * NOTE: it considers block number from index entry as
+ * allocated block. Thus, index entries have to be consistent
+ * with leaves.
+ */
+#define EXT_MAX_BLOCKS (ext4_lblk_t)-1
+
+ext4_lblk_t
+ext4_ext_next_allocated_block(struct ext4_ext_path *path, int at)
+{
+	if (at == 0 && path->p_ext == NULL)
+		return EXT_MAX_BLOCKS;
+
+	while (at >= 0) {
+		if (at == path->p_depth) {
+			/* leaf */
+			if (path[at].p_ext &&
+				path[at].p_ext !=
+					EXT_LAST_EXTENT(path[at].p_hdr))
+			  return ext4_ext_lblock(&path[at].p_ext[1]);
+		} else {
+			/* index */
+			if (path[at].p_idx !=
+					EXT_LAST_INDEX(path[at].p_hdr))
+			  return ext4_idx_lblock(&path[at].p_idx[1]);
+		}
+		at--;
+	}
+
+	return EXT_MAX_BLOCKS;
+}
+
 
 static int ext4_ext_insert_index(struct inode *inode,
 				 struct ext4_ext_path *path,
@@ -1078,6 +1113,89 @@ static int ext4_ext_remove_idx(struct inode *inode, struct ext4_ext_path *path, 
 	return err;
 }
 
+static int ext4_ext_amalgamate(struct inode *inode, struct ext4_ext_path *path,
+			       int at)
+{
+	int new_entries, right_entries;
+	int depth = ext_depth(inode);
+	struct ext4_ext_path *right_path = NULL;
+	ext4_lblk_t now;
+	int ret = 0;
+	if (!at)
+		return 0;
+
+	now = ext4_ext_next_allocated_block(path, at - 1);
+	if (now == EXT_MAX_BLOCKS)
+		goto out;
+
+	ret = ext4_find_extent(inode, now, &right_path, 0);
+	if (ret)
+		goto out;
+
+	right_entries = le16_to_cpu(right_path[at].p_hdr->eh_entries);
+	new_entries = le16_to_cpu(path[at].p_hdr->eh_entries) +
+		      right_entries;
+	if (new_entries > path[at].p_hdr->eh_max) {
+		ret = 0;
+		goto out;
+	}
+	if (at == depth) {
+		struct ext4_extent *last_ex = EXT_LAST_EXTENT(path[at].p_hdr);
+		memmove(last_ex + 1,
+			EXT_FIRST_EXTENT(right_path[at].p_hdr),
+			right_entries * sizeof(struct ext4_extent));
+	} else {
+		struct ext4_extent_idx *last_ix = EXT_LAST_INDEX(path[at].p_hdr);
+		memmove(last_ix + 1,
+			EXT_FIRST_INDEX(right_path[at].p_hdr),
+			right_entries * sizeof(struct ext4_extent_idx));
+	}
+	path[at].p_hdr->eh_entries = cpu_to_le16(new_entries);
+	right_path[at].p_hdr->eh_entries = 0;
+	__ext4_ext_dirty(inode, path + at);
+
+	/*
+	 * remove the empty node from index block above.
+	 */
+	depth = at;
+	while (depth > 0) {
+		struct ext4_extent_header *eh = right_path[depth].p_hdr;
+		if (eh->eh_entries == 0 && right_path[depth].p_bh != NULL) {
+			ret = ext4_ext_remove_idx(inode, right_path, depth - 1);
+			if (ret)
+				goto out;
+
+			ext4_ext_drop_refs(right_path + depth, 1);
+		} else
+			break;
+
+		depth--;
+	}
+	ret = ext4_ext_correct_indexes(inode, right_path, depth);
+out:
+	if (right_path)
+		ext4_ext_free_path(right_path);
+
+	return ret;
+}
+
+static int ext4_ext_balance(struct inode *inode, struct ext4_ext_path *path,
+			    int at)
+{
+	int ret;
+	int depth = at;
+
+	while (depth > 0) {
+		ret = ext4_ext_amalgamate(inode, path, depth);
+		if (ret)
+			goto out;
+
+		depth--;
+	}
+out:
+	return ret;
+}
+
 /*
  * NOTE: After removal, path should not be reused.
  */
@@ -1136,46 +1254,9 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
 			cpu_to_le16(ext4_ext_space_root(inode, 0));
 		err = __ext4_ext_dirty(inode, path);
 	}
+	err = ext4_ext_balance(inode, path, depth);
 
 	return err;
-}
-
-/*
- * ext4_ext_next_allocated_block:
- * returns allocated block in subsequent extent or EXT_MAX_BLOCKS.
- * NOTE: it considers block number from index entry as
- * allocated block. Thus, index entries have to be consistent
- * with leaves.
- */
-#define EXT_MAX_BLOCKS (ext4_lblk_t)-1
-
-ext4_lblk_t
-ext4_ext_next_allocated_block(struct ext4_ext_path *path)
-{
-	int depth;
-
-	depth = path->p_depth;
-
-	if (depth == 0 && path->p_ext == NULL)
-		return EXT_MAX_BLOCKS;
-
-	while (depth >= 0) {
-		if (depth == path->p_depth) {
-			/* leaf */
-			if (path[depth].p_ext &&
-				path[depth].p_ext !=
-					EXT_LAST_EXTENT(path[depth].p_hdr))
-			  return ext4_ext_lblock(&path[depth].p_ext[1]);
-		} else {
-			/* index */
-			if (path[depth].p_idx !=
-					EXT_LAST_INDEX(path[depth].p_hdr))
-			  return ext4_idx_lblock(&path[depth].p_idx[1]);
-		}
-		depth--;
-	}
-
-	return EXT_MAX_BLOCKS;
 }
 
 int ext4_ext_truncate(struct inode *inode,
@@ -1230,7 +1311,7 @@ int ext4_ext_truncate(struct inode *inode,
 		goto out;
 	}
 	if (ext4_ext_lblock(ex) + ext4_ext_get_actual_len(ex) - 1 < from) {
-		now = ext4_ext_next_allocated_block(path);
+		now = ext4_ext_next_allocated_block(path, depth);
 		ret = ext4_find_extent(inode, now, &path, 0);
 		if (ret)
 			goto out;
@@ -1261,7 +1342,7 @@ int ext4_ext_truncate(struct inode *inode,
 			}
 		}
 
-		now = ext4_ext_next_allocated_block(path);
+		now = ext4_ext_next_allocated_block(path, depth);
 		if (!new_len) {
 			ret = ext4_ext_remove_extent(inode, path);
 			if (ret)
@@ -1498,7 +1579,7 @@ int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_lblk_t iblock,
 
 	/* find next allocated block so that we know how many
 	 * blocks we can allocate without ovelapping next extent */
-	next = ext4_ext_next_allocated_block(path);
+	next = ext4_ext_next_allocated_block(path, depth);
 	allocated = next - iblock;
 	if (allocated > max_blocks)
 		allocated = max_blocks;
