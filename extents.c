@@ -1196,7 +1196,6 @@ static int ext4_ext_amalgamate(struct inode *inode, struct ext4_ext_path *path,
 	if (now == EXT_MAX_BLOCKS)
 		goto out;
 
-	printf("%"PRIu32"\n", now);
 	ret = ext4_find_extent(inode, now, &right_path, 0);
 	if (ret)
 		goto out;
@@ -1375,6 +1374,9 @@ int ext4_ext_truncate(struct inode *inode,
 			ext4_ext_mark_unwritten(ex);
 
 		__ext4_ext_dirty(inode, path + depth);
+
+		ext4_ext_remove_blocks(inode,
+				ex, from, to);
 
 		ext4_ext_store_lblock(&newex, to + 1);
 		newex.ee_len = cpu_to_le16(ee_block + len - 1 - to);
