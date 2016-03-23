@@ -778,8 +778,10 @@ static int ext4_ext_correct_indexes(struct inode *inode,
 		if (err)
 			return err;
 
-	} else
+	} else {
+		border = path[at].p_idx->ei_block;
 		k = at;
+	}
 
 	while (k) {
 		/* change all left-side indexes */
