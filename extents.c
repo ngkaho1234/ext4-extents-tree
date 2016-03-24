@@ -1319,7 +1319,6 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path **path)
 	}
 	err = ext4_ext_correct_indexes(inode, *path, depth);
 
-	/* TODO: flexible tree reduction should be here */
 	if ((*path)->p_hdr->eh_entries == 0) {
 		/*
 		 * truncate to zero freed all the tree,
