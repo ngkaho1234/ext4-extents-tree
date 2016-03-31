@@ -72,34 +72,32 @@ static void ext4_ext_free_blocks(struct inode *inode,
 #define ext_debug printf
 #endif
 
+#ifdef AGGRESSIVE_TEST
+#define EXT_MAX_DEPTH 31
+#else
+#define EXT_MAX_DEPTH 7
+#endif
+
 void ext4_ext_drop_refs(struct ext4_ext_path *path, int keep_below);
 
 static struct ext4_ext_path *
 ext4_ext_alloc_path(struct inode *inode,
 		    struct ext4_ext_path **orig_path)
 {
-	int depth = ext_depth(inode);
-	int path_depth = depth + 1;
 	struct ext4_ext_path *path = (orig_path)?(*orig_path):NULL;
 
 	if (path) {
-		if (depth > path[0].p_maxdepth) {
-			ext4_ext_drop_refs(path, 0);
-			xfree(path);
-			*orig_path = NULL;
-		} else {
-			ext4_ext_drop_refs(path, 0);
-			return path;
-		}
+		ext4_ext_drop_refs(path, 0);
+		memset(path, 0, sizeof(struct ext4_ext_path) *
+			(EXT_MAX_DEPTH + 1));
+		return path;
 	}
 
-	/* account possible depth increase */
 	path = xzalloc(sizeof(struct ext4_ext_path) *
-			(path_depth + 1));
+			(EXT_MAX_DEPTH + 1));
 	if (!path)
 		return NULL;
 
-	path[0].p_maxdepth = path_depth;
 	return path;
 }
 
@@ -435,6 +433,10 @@ static ext4_fsblk_t ext4_bh_block(struct buffer_head *bh)
 	return bh->b_blocknr;
 }
 
+/*
+ * If existing path is provided, the path will first be zeroed, then
+ * be reused.
+ */
 int ext4_find_extent(struct inode *inode, ext4_lblk_t block,
 		 struct ext4_ext_path **orig_path, int flags)
 {
@@ -1102,10 +1104,9 @@ void print_path(struct ext4_ext_path *path)
 }
 
 
-int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path **ppath, struct ext4_extent *newext, int flags)
+int ext4_ext_insert_extent(struct inode *inode, struct ext4_ext_path *path, struct ext4_extent *newext, int flags)
 {
 	int depth, level, ret = 0;
-	struct ext4_ext_path *path = *ppath;
 
 again:
 	depth = ext_depth(inode);
@@ -1124,11 +1125,10 @@ again:
 			if (ret)
 				goto out;
 
-			ret = ext4_find_extent(inode, ext4_ext_lblock(newext), ppath, 0);
+			ret = ext4_find_extent(inode, ext4_ext_lblock(newext), &path, 0);
 			if (ret)
 				goto out;
 
-			path = *ppath;
 			/*
 			 * After growing the tree, there should be free space in
 			 * the only child node of the root.
@@ -1257,21 +1257,19 @@ out:
 	return ret;
 }
 
-static int ext4_ext_balance(struct inode *inode, struct ext4_ext_path **path,
+static int ext4_ext_balance(struct inode *inode, struct ext4_ext_path *path,
 			    int at)
 {
 	int ret, shrinked = 0;
 	int depth = at;
 
 	while (depth > 0) {
-		ret = ext4_ext_amalgamate(inode, *path, depth);
+		ret = ext4_ext_amalgamate(inode, path, depth);
 		if (ret)
 			goto out;
 
 		depth--;
 	}
-	ext4_ext_free_path(*path);
-	*path = NULL;
 	do {
 		ret = ext4_ext_shrink_indepth(inode, 0, &shrinked);
 	} while (!ret && shrinked);
@@ -1283,16 +1281,16 @@ out:
 /*
  * NOTE: After removal, path should not be reused.
  */
-int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path **path)
+int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path *path)
 {
 	int len;
 	int err = 0;
 	ext4_lblk_t start;
 	uint16_t new_entries;
 	int depth = ext_depth(inode);
-	struct ext4_extent *ex = (*path)[depth].p_ext,
+	struct ext4_extent *ex = path[depth].p_ext,
 			   *ex2 = ex + 1;
-	struct ext4_extent_header *eh = (*path)[depth].p_hdr;
+	struct ext4_extent_header *eh = path[depth].p_hdr;
 	if (!ex)
 		return -EINVAL;
 
@@ -1306,17 +1304,17 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path **path)
 			(EXT_LAST_EXTENT(eh) - ex2 + 1) * sizeof(struct ext4_extent));
 	eh->eh_entries = cpu_to_le16(new_entries);
 
-	__ext4_ext_dirty(inode, (*path) + depth);
+	__ext4_ext_dirty(inode, path + depth);
 
 	/*
 	 * If the node is free, then we should
 	 * remove it from index block above.
 	 */
 	while (depth > 0) {
-		eh = (*path)[depth].p_hdr;
-		if (eh->eh_entries == 0 && (*path)[depth].p_bh != NULL) {
-			ext4_ext_drop_refs((*path) + depth, 1);
-			err = ext4_ext_remove_idx(inode, *path, depth - 1);
+		eh = path[depth].p_hdr;
+		if (eh->eh_entries == 0 && path[depth].p_bh != NULL) {
+			ext4_ext_drop_refs(path + depth, 1);
+			err = ext4_ext_remove_idx(inode, path, depth - 1);
 			if (err)
 				break;
 
@@ -1325,9 +1323,9 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path **path)
 
 		depth--;
 	}
-	err = ext4_ext_correct_indexes(inode, *path, depth);
+	err = ext4_ext_correct_indexes(inode, path, depth);
 
-	if ((*path)->p_hdr->eh_entries == 0) {
+	if (path->p_hdr->eh_entries == 0) {
 		/*
 		 * truncate to zero freed all the tree,
 		 * so we need to correct eh_depth
@@ -1335,7 +1333,7 @@ int ext4_ext_remove_extent(struct inode *inode, struct ext4_ext_path **path)
 		ext_inode_hdr(inode)->eh_depth = 0;
 		ext_inode_hdr(inode)->eh_max =
 			cpu_to_le16(ext4_ext_space_root(inode, 0));
-		err = __ext4_ext_dirty(inode, *path);
+		err = __ext4_ext_dirty(inode, path);
 	}
 	err = ext4_ext_balance(inode, path, depth);
 
@@ -1393,7 +1391,7 @@ int ext4_ext_truncate(struct inode *inode,
 		if (unwritten)
 			ext4_ext_mark_unwritten(&newex);
 
-		ret = ext4_ext_insert_extent(inode, &path, &newex, 0);
+		ret = ext4_ext_insert_extent(inode, path, &newex, 0);
 		goto out;
 	}
 	if (ext4_ext_lblock(ex) + ext4_ext_get_actual_len(ex) - 1 < from) {
@@ -1430,7 +1428,7 @@ int ext4_ext_truncate(struct inode *inode,
 
 		now = ext4_ext_next_allocated_block(path, depth);
 		if (!new_len) {
-			ret = ext4_ext_remove_extent(inode, &path);
+			ret = ext4_ext_remove_extent(inode, path);
 			if (ret)
 				goto out;
 
@@ -1461,7 +1459,7 @@ out:
 }
 
 int ext4_ext_split_extent_at(struct inode *inode,
-			     struct ext4_ext_path **ppath,
+			     struct ext4_ext_path *path,
 			     ext4_lblk_t split,
 			     int split_flag)
 {
@@ -1472,7 +1470,7 @@ int ext4_ext_split_extent_at(struct inode *inode,
 	int depth = ext_depth(inode);
 	int err = 0;
 
-	ex = (*ppath)[depth].p_ext;
+	ex = path[depth].p_ext;
 	ee_block = ext4_ext_lblock(ex);
 	ee_len = ext4_ext_get_actual_len(ex);
 	newblock = split - ee_block + ext4_ext_pblock(ex);
@@ -1488,7 +1486,7 @@ int ext4_ext_split_extent_at(struct inode *inode,
 		else
 			ext4_ext_mark_initialized(ex);
 
-		err = __ext4_ext_dirty(inode, *ppath + depth);
+		err = __ext4_ext_dirty(inode, path + depth);
 		goto out;
 	}
 
@@ -1496,7 +1494,7 @@ int ext4_ext_split_extent_at(struct inode *inode,
 	if (split_flag & EXT4_EXT_MARK_UNWRIT1)
 		ext4_ext_mark_unwritten(ex);
 
-	err = __ext4_ext_dirty(inode, *ppath + depth);
+	err = __ext4_ext_dirty(inode, path + depth);
 	if (err)
 		goto out;
 
@@ -1505,7 +1503,7 @@ int ext4_ext_split_extent_at(struct inode *inode,
 	ext4_ext_store_pblock(&newex, newblock);
 	if (split_flag & EXT4_EXT_MARK_UNWRIT2)
 		ext4_ext_mark_unwritten(&newex);
-	err = ext4_ext_insert_extent(inode, ppath, &newex,
+	err = ext4_ext_insert_extent(inode, path, &newex,
 				EXT4_EXT_NO_COMBINE);
 	if (err)
 		goto restore_extent_len;
@@ -1514,36 +1512,36 @@ out:
 	return err;
 restore_extent_len:
 	ex->ee_len = cpu_to_le16(ee_len);
-	err = __ext4_ext_dirty(inode, *ppath + depth);
+	err = __ext4_ext_dirty(inode, path + depth);
 	return err;
 }
 
 static int ext4_ext_convert_to_initialized (
 		struct inode *inode,
-		struct ext4_ext_path **ppath,
+		struct ext4_ext_path *path,
 		ext4_lblk_t split,
 		unsigned long blocks)
 {
 	int depth = ext_depth(inode), err;
-	struct ext4_extent *ex = (*ppath)[depth].p_ext;
+	struct ext4_extent *ex = path[depth].p_ext;
 
 	assert (ext4_ext_lblock(ex) <= split);
 
 	if (split + blocks == ext4_ext_lblock(ex)
 				+ ext4_ext_get_actual_len(ex)) {
 		/* split and initialize right part */
-		err = ext4_ext_split_extent_at(inode, ppath, split,
+		err = ext4_ext_split_extent_at(inode, path, split,
 				EXT4_EXT_MARK_UNWRIT1);
 	} else if (ext4_ext_lblock(ex) == split) {
 		/* split and initialize left part */
-		err = ext4_ext_split_extent_at(inode, ppath, split + blocks,
+		err = ext4_ext_split_extent_at(inode, path, split + blocks,
 				EXT4_EXT_MARK_UNWRIT2);
 	} else {
 		/* split 1 extent to 3 and initialize the 2nd */
-		err = ext4_ext_split_extent_at(inode, ppath, split + blocks,
+		err = ext4_ext_split_extent_at(inode, path, split + blocks,
 				EXT4_EXT_MARK_UNWRIT1 | EXT4_EXT_MARK_UNWRIT2);
 		if (!err) {
-			err = ext4_ext_split_extent_at(inode, ppath, split,
+			err = ext4_ext_split_extent_at(inode, path, split,
 					EXT4_EXT_MARK_UNWRIT1);
 		}
 	}
@@ -1638,7 +1636,7 @@ int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_lblk_t iblock,
 						goto out2;
 
 					err = ext4_ext_convert_to_initialized(
-					    inode, &path, iblock,
+					    inode, path, iblock,
 					    zero_range);
 					if (err)
 						goto out2;
@@ -1681,7 +1679,7 @@ int ext4_ext_get_blocks(void *handle, struct inode *inode, ext4_lblk_t iblock,
 	ext4_ext_store_lblock(&newex, iblock);
 	ext4_ext_store_pblock(&newex, newblock);
 	newex.ee_len = cpu_to_le16(allocated);
-	err = ext4_ext_insert_extent(inode, &path, &newex, 0);
+	err = ext4_ext_insert_extent(inode, path, &newex, 0);
 	if (err) {
 		/* free data blocks we just allocated */
 		ext4_ext_free_blocks(inode, ext4_ext_pblock(&newex),

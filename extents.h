@@ -127,7 +127,6 @@ struct ext4_ext_path
 {
 	ext4_fsblk_t p_block;
 	int p_depth;
-	int p_maxdepth;
 	struct ext4_extent *p_ext;
 	struct ext4_extent_idx *p_idx;
 	struct ext4_extent_header *p_hdr;
