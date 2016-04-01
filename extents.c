@@ -617,6 +617,8 @@ static int ext4_ext_split_node(struct inode *inode,
 	ext4_fsblk_t *newblocks = NULL;
 	int depth = ext_depth(inode);
 	int nblocks = depth - at + 1;
+	ext4_lblk_t prev_insert_index;
+	int prev_set_to_ix;
 
 	assert(at > 0);
 	newblocks = xzalloc(sizeof(ext4_fsblk_t) * nblocks);
@@ -632,7 +634,7 @@ static int ext4_ext_split_node(struct inode *inode,
 			goto cleanup;
 	}
 
-	for (i = at;i <= depth;i++) {
+	for (i = depth;i >= at;i--) {
 		int mid, max, rem, curr;
 		ext4_lblk_t insert_index;
 		struct buffer_head *bh = NULL;
@@ -710,15 +712,21 @@ static int ext4_ext_split_node(struct inode *inode,
 			} else
 				fs_brelse(bh);
 
+			ret = ext4_ext_insert_index(inode, path, i,
+					prev_insert_index,
+					newblocks[i - at + 1],
+					prev_set_to_ix);
+			if (ret)
+				break;
 		}
-
-		ret = ext4_ext_insert_index(inode, path, i - 1,
-				insert_index,
-				newblocks[i - at],
-				curr >= mid);
-		if (ret)
-			break;
+		prev_set_to_ix = curr >= mid;
+		prev_insert_index = insert_index;
 	}
+	if (!ret)
+		ret = ext4_ext_insert_index(inode, path, i,
+				prev_insert_index,
+				newblocks[0],
+				prev_set_to_ix);
 
 cleanup:
 	if (ret) {
