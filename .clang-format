@@ -1,0 +1,10 @@
+IndentWidth: 8
+UseTab: Always
+AlignConsecutiveDeclarations: true
+AlignAfterOpenBracket: Align
+AllowShortIfStatementsOnASingleLine: false
+AlwaysBreakAfterReturnType: All
+BreakBeforeBraces: Linux
+IndentCaseLabels: false
+PointerAlignment: Right
+SpaceBeforeParens: ControlStatements
