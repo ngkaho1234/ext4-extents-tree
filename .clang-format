@@ -1,6 +1,5 @@
 IndentWidth: 8
 UseTab: Always
-AlignConsecutiveDeclarations: true
 AlignAfterOpenBracket: Align
 AllowShortIfStatementsOnASingleLine: false
 AlwaysBreakAfterReturnType: All
