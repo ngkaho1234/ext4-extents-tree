@@ -43,7 +43,7 @@ ext4_new_meta_blocks(struct inode *inode, ext4_fsblk_t goal, unsigned int flags,
 		     ext4_lblk_t *count, int *errp)
 {
 	ext4_fsblk_t block = 0;
-	ext4_lblk_t  nrblocks = (count) ? (*count) : 1;
+	ext4_lblk_t nrblocks = (count) ? (*count) : 1;
 	UNUSED(flags);
 
 	*errp = ext4_allocate_single_block(inode, goal, &block, nrblocks);
@@ -92,27 +92,27 @@ typedef int (*extcursor_free_block_t)(struct ext4_ext_cursor *,
 				      ext4_fsblk_t block);
 
 struct ext4_cursor_op {
-	extcursor_root_dirty_t  c_root_dirty_func;
+	extcursor_root_dirty_t c_root_dirty_func;
 	extcursor_alloc_block_t c_alloc_block_func;
-	extcursor_free_block_t  c_free_block_func;
+	extcursor_free_block_t c_free_block_func;
 } ext4_test_cursor_op = {.c_root_dirty_func = extcursor_root_dirty,
 			 .c_alloc_block_func = extcursor_alloc_block,
 			 .c_free_block_func = extcursor_free_block};
 
 struct ext4_ext_path {
 	struct buffer_head *p_bcb;
-	void *		    p_data;
-	ssize_t		    p_ptr;
+	void *p_data;
+	ssize_t p_ptr;
 };
 
 struct ext4_ext_cursor {
-	void *		      c_root;
-	void *		      c_fsinfo;
-	struct super_block *  c_superblock;
+	void *c_root;
+	void *c_fsinfo;
+	struct super_block *c_superblock;
 	struct ext4_cursor_op c_cursor_op;
 	struct ext4_ext_path *c_paths;
-	size_t		      c_blocksz;
-	int		      c_maxdepth;
+	size_t c_blocksz;
+	int c_maxdepth;
 };
 
 static void
@@ -124,7 +124,7 @@ extcursor_root_dirty(struct ext4_ext_cursor *cur)
 static int
 extcursor_alloc_block(struct ext4_ext_cursor *cur, ext4_fsblk_t *nblockp)
 {
-	int	 ret;
+	int ret;
 	ext4_lblk_t count = 1;
 	*nblockp = ext4_new_meta_blocks((struct inode *)cur->c_fsinfo, 0, 0,
 					&count, &ret);
@@ -229,7 +229,7 @@ ext4_ext_header_set_entries(struct ext4_extent_header *hdr, uint16_t entries)
  */
 static inline void
 ext4_ext_header_set_generation(struct ext4_extent_header *hdr,
-			       uint32_t			  generation)
+			       uint32_t generation)
 {
 	hdr->eh_generation = ext4_cpu_to_le16(generation);
 }
@@ -292,7 +292,7 @@ ext4_ext_store_len(struct ext4_extent *ext, ext4_extlen_t len)
 static inline ext4_fsblk_t
 ext4_ext_block(struct ext4_extent *ext)
 {
-	ext4_fsblk_t	block;
+	ext4_fsblk_t block;
 
 	block = ext4_le32_to_cpu(ext->ee_start_lo);
 	block |= ((ext4_fsblk_t)ext4_le16_to_cpu(ext->ee_start_hi) << 31) << 1;
@@ -306,7 +306,7 @@ ext4_ext_block(struct ext4_extent *ext)
 static inline ext4_fsblk_t
 ext4_idx_block(struct ext4_extent_idx *idx)
 {
-	ext4_fsblk_t	block;
+	ext4_fsblk_t block;
 
 	block = ext4_le32_to_cpu(idx->ei_leaf_lo);
 	block |= ((ext4_fsblk_t)ext4_le16_to_cpu(idx->ei_leaf_hi) << 31) << 1;
@@ -386,7 +386,7 @@ ext4_idx_store_lblock(struct ext4_extent_idx *idx, ext4_lblk_t lblock)
 uint16_t
 ext4_ext_root_maxitems()
 {
-	uint16_t	room;
+	uint16_t room;
 
 	room = EXT4_EXT_ROOT_SIZE - sizeof(struct ext4_extent_header);
 
@@ -405,10 +405,10 @@ ext4_ext_root_maxitems()
 uint16_t
 ext4_ext_node_maxitems(size_t blocksz)
 {
-	uint16_t	room;
+	uint16_t room;
 
 	room = blocksz - sizeof(struct ext4_extent_header) -
-	    sizeof(struct ext4_extent_tail);
+	       sizeof(struct ext4_extent_tail);
 
 #ifdef AGGRESSIVE_TEST
 	return 4;
@@ -438,11 +438,11 @@ struct ext4_ext_cursor *
 ext4_ext_cursor_alloc(struct super_block *sb, void *root, void *fsinfo,
 		      size_t blocksz)
 {
-	struct ext4_ext_path		*paths;
-	struct ext4_extent_header	*hdr;
-	int				i;
-	int				rootdepth;
-	struct ext4_ext_cursor		*cur;
+	struct ext4_ext_path *paths;
+	struct ext4_extent_header *hdr;
+	int i;
+	int rootdepth;
+	struct ext4_ext_cursor *cur;
 
 	hdr = (struct ext4_extent_header *)root;
 	rootdepth = ext4_ext_header_depth(hdr);
@@ -502,8 +502,8 @@ ext4_ext_path_unpin(struct ext4_ext_path *pathp)
 void
 ext4_ext_cursor_unpin(struct ext4_ext_cursor *cur, int depth, int nrlevel)
 {
-	int	i;
-	int	maxdepth;
+	int i;
+	int maxdepth;
 
 	maxdepth = cur->c_maxdepth;
 
@@ -528,8 +528,8 @@ ext4_ext_cursor_unpin(struct ext4_ext_cursor *cur, int depth, int nrlevel)
 static int
 ext4_ext_cursor_reset_rootpath(struct ext4_ext_cursor *cur)
 {
-	struct ext4_ext_path	*paths;
-	int			rootdepth;
+	struct ext4_ext_path *paths;
+	int rootdepth;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 
@@ -561,8 +561,8 @@ void
 ext4_ext_cursor_swap_paths(struct ext4_ext_cursor *a, struct ext4_ext_cursor *b,
 			   int depth, int nrlevel)
 {
-	int	i;
-	int	maxdepth;
+	int i;
+	int maxdepth;
 
 	maxdepth = a->c_maxdepth;
 
@@ -638,13 +638,13 @@ ext4_ext_lblock_cmp(ext4_lblk_t a, ext4_lblk_t b)
 static void
 ext4_ext_binsearch_node(void *buf, ext4_lblk_t lblock, ssize_t *ptr)
 {
-	int				diff = 0;
+	int diff = 0;
 	/* search range: @lower <= @mid <= @upper */
-	ssize_t 			lower;
-	ssize_t				upper;
-	ssize_t				mid = 0;
-	struct ext4_extent_header	*hdr;
-	struct ext4_extent_idx		*idx;
+	ssize_t lower;
+	ssize_t upper;
+	ssize_t mid = 0;
+	struct ext4_extent_header *hdr;
+	struct ext4_extent_idx *idx;
 
 	hdr = (struct ext4_extent_header *)buf;
 	lower = 0;
@@ -684,13 +684,13 @@ ext4_ext_binsearch_node(void *buf, ext4_lblk_t lblock, ssize_t *ptr)
 static void
 ext4_ext_binsearch_leaf(void *buf, ext4_lblk_t lblock, ssize_t *ptr)
 {
-	int				diff = 0;
+	int diff = 0;
 	/* search range: @lower <= @mid <= @upper */
-	ssize_t				lower;
-	ssize_t				upper;
-	ssize_t				mid = 0;
-	struct ext4_extent_header	*hdr;
-	struct ext4_extent		*ext;
+	ssize_t lower;
+	ssize_t upper;
+	ssize_t mid = 0;
+	struct ext4_extent_header *hdr;
+	struct ext4_extent *ext;
 
 	hdr = (struct ext4_extent_header *)buf;
 	lower = 0;
@@ -735,10 +735,10 @@ int
 ext4_ext_lookup_extent(struct ext4_ext_cursor *cur, ext4_lblk_t lblock,
 		       bool *notfound)
 {
-	int			ret = 0;
-	int			depth;
-	int			rootdepth;
-	struct super_block	*sb;
+	int ret = 0;
+	int depth;
+	int rootdepth;
+	struct super_block *sb;
 
 	sb = cur->c_superblock;
 	rootdepth = ext4_ext_cursor_depth(cur);
@@ -749,7 +749,7 @@ ext4_ext_lookup_extent(struct ext4_ext_cursor *cur, ext4_lblk_t lblock,
 	ext4_assert(cur->c_paths[rootdepth].p_data);
 
 	for (depth = rootdepth; depth >= 0; depth--) {
-		struct ext4_ext_path       npath = {0};
+		struct ext4_ext_path npath = {0};
 		struct ext4_extent_header *hdr;
 
 		hdr = (struct ext4_extent_header *)cur->c_paths[depth].p_data;
@@ -801,7 +801,7 @@ ext4_ext_lookup_extent(struct ext4_ext_cursor *cur, ext4_lblk_t lblock,
 struct ext4_extent *
 ext4_ext_cursor_ext(struct ext4_ext_cursor *cur)
 {
-	struct ext4_extent_header	*hdr;
+	struct ext4_extent_header *hdr;
 
 	hdr = (struct ext4_extent_header *)cur->c_paths[0].p_data;
 
@@ -829,8 +829,8 @@ ext4_ext_tree_empty(struct ext4_ext_cursor *cur)
 static inline ext4_lblk_t
 ext4_ext_node_lblock(void *data)
 {
-	struct ext4_extent_header	*hdr;
-	union ext4_extent_item		*itemp;
+	struct ext4_extent_header *hdr;
+	union ext4_extent_item *itemp;
 
 	hdr = (struct ext4_extent_header *)data;
 	itemp = EXT_FIRST_ITEM(hdr);
@@ -855,18 +855,18 @@ static int
 ext4_ext_split_node(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblock,
 		    struct ext4_ext_path *pathp)
 {
-	int				ret;
-	ssize_t				ptr;
-	ssize_t				nptr = -1;
-	void				*ndata;
-	struct buffer_head		*nbcb;
-	uint16_t			nritems;
-	uint16_t			nnritems;
-	struct super_block		*sb;
-	struct ext4_extent_header	*hdr;
-	struct ext4_extent_header	*nhdr;
-	union ext4_extent_item		*items;
-	union ext4_extent_item		*nitems;
+	int ret;
+	ssize_t ptr;
+	ssize_t nptr = -1;
+	void *ndata;
+	struct buffer_head *nbcb;
+	uint16_t nritems;
+	uint16_t nnritems;
+	struct super_block *sb;
+	struct ext4_extent_header *hdr;
+	struct ext4_extent_header *nhdr;
+	union ext4_extent_item *items;
+	union ext4_extent_item *nitems;
 
 	ext4_assert(depth != ext4_ext_cursor_depth(cur));
 
@@ -924,17 +924,17 @@ static int
 ext4_ext_tree_grow(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblock,
 		   struct ext4_ext_path *pathp)
 {
-	int				ret;
-	void				*ndata;
-	struct buffer_head		*nbcb;
-	uint16_t			nritems;
-	uint16_t			nnritems;
-	struct super_block		*sb;
-	struct ext4_extent_header	*hdr;
-	struct ext4_extent_header	*nhdr;
-	union ext4_extent_item		*items;
-	union ext4_extent_item		*nitems;
-	ssize_t				nptr;
+	int ret;
+	void *ndata;
+	struct buffer_head *nbcb;
+	uint16_t nritems;
+	uint16_t nnritems;
+	struct super_block *sb;
+	struct ext4_extent_header *hdr;
+	struct ext4_extent_header *nhdr;
+	union ext4_extent_item *items;
+	union ext4_extent_item *nitems;
+	ssize_t nptr;
 
 	sb = cur->c_superblock;
 
@@ -984,8 +984,8 @@ ext4_ext_tree_grow(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblock,
 static void
 ext4_ext_update_index(struct ext4_ext_cursor *cur, int depth)
 {
-	int	i;
-	int	rootdepth;
+	int i;
+	int rootdepth;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 
@@ -1048,10 +1048,10 @@ static void
 ext4_ext_insert_item(struct ext4_ext_cursor *cur, int depth,
 		     union ext4_extent_item *nitems, bool updptr)
 {
-	struct ext4_extent_header	*hdr;
-	uint16_t			nritems;
-	ssize_t				ptr;
-	union ext4_extent_item		*item;
+	struct ext4_extent_header *hdr;
+	uint16_t nritems;
+	ssize_t ptr;
+	union ext4_extent_item *item;
 
 	hdr = (struct ext4_extent_header *)cur->c_paths[depth].p_data;
 	nritems = ext4_ext_header_entries(hdr);
@@ -1102,8 +1102,8 @@ ext4_ext_insert_item(struct ext4_ext_cursor *cur, int depth,
 static int
 ext4_ext_nrlevel_need_split(struct ext4_ext_cursor *cur)
 {
-	int	i;
-	int	rootdepth;
+	int i;
+	int rootdepth;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 
@@ -1130,19 +1130,19 @@ ext4_ext_nrlevel_need_split(struct ext4_ext_cursor *cur)
 static int
 ext4_ext_ensure_unfull(struct ext4_ext_cursor *cur)
 {
-	int		ret = 0;
-	ext4_fsblk_t	*nblocks = NULL;
-	int		rootdepth;
-	int		nrlevel;
-	int		nrallocs = 0;
+	int ret = 0;
+	ext4_fsblk_t *nblocks = NULL;
+	int rootdepth;
+	int nrlevel;
+	int nrallocs = 0;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 	nrlevel = ext4_ext_nrlevel_need_split(cur);
 
 	if (nrlevel) {
-		uint16_t	       i;
-		ssize_t		       pptr;
-		ext4_lblk_t	    prlblock;
+		uint16_t i;
+		ssize_t pptr;
+		ext4_lblk_t prlblock;
 		union ext4_extent_item nitems;
 
 		nblocks =
@@ -1158,8 +1158,8 @@ ext4_ext_ensure_unfull(struct ext4_ext_cursor *cur)
 				goto out;
 		}
 		for (i = 0; i < nrlevel; i++) {
-			ssize_t		     ptr;
-			ext4_lblk_t	  rlblock;
+			ssize_t ptr;
+			ext4_lblk_t rlblock;
 			struct ext4_ext_path path = {0};
 
 			if (i < rootdepth) {
@@ -1229,7 +1229,7 @@ out:
 int
 ext4_ext_insert(struct ext4_ext_cursor *cur, struct ext4_extent *next)
 {
-	int	ret;
+	int ret;
 
 	ret = ext4_ext_ensure_unfull(cur);
 	if (ret)
@@ -1251,10 +1251,10 @@ ext4_ext_insert(struct ext4_ext_cursor *cur, struct ext4_extent *next)
 static void
 ext4_ext_delete_item(struct ext4_ext_cursor *cur, int depth)
 {
-	ssize_t				ptr;
-	ssize_t				nritems;
-	struct ext4_extent_header	*hdr;
-	union ext4_extent_item		*item;
+	ssize_t ptr;
+	ssize_t nritems;
+	struct ext4_extent_header *hdr;
+	union ext4_extent_item *item;
 
 	ptr = cur->c_paths[depth].p_ptr;
 	hdr = (struct ext4_extent_header *)cur->c_paths[depth].p_data;
@@ -1288,8 +1288,8 @@ ext4_ext_delete_item(struct ext4_ext_cursor *cur, int depth)
 static bool
 ext4_ext_may_merge(struct ext4_ext_cursor *cur, int depth)
 {
-	struct ext4_extent_header	*hdr;
-	uint16_t			nritems;
+	struct ext4_extent_header *hdr;
+	uint16_t nritems;
 
 	hdr = (struct ext4_extent_header *)cur->c_paths[depth].p_data;
 	nritems = ext4_ext_header_entries(hdr);
@@ -1313,12 +1313,12 @@ static int
 ext4_ext_left_sibling(struct ext4_ext_cursor *cur, int depth,
 		      struct ext4_ext_cursor **ncurp, bool *nosibp)
 {
-	int				ret = 0;
-	ext4_lblk_t			lblock;
-	bool				nosib = true;
-	struct ext4_ext_cursor		*ncur = NULL;
-	struct ext4_extent_header	*hdr;
-	union ext4_extent_item		*itemp;
+	int ret = 0;
+	ext4_lblk_t lblock;
+	bool nosib = true;
+	struct ext4_ext_cursor *ncur = NULL;
+	struct ext4_extent_header *hdr;
+	union ext4_extent_item *itemp;
 
 	hdr = (struct ext4_extent_header *)cur->c_paths[depth].p_data;
 	itemp = EXT_FIRST_ITEM(hdr);
@@ -1370,14 +1370,14 @@ static int
 ext4_ext_right_sibling(struct ext4_ext_cursor *cur, int depth,
 		       struct ext4_ext_cursor **ncurp, bool *nosibp)
 {
-	int				ret = 0;
-	int				i;
-	ext4_lblk_t			lblock;
-	bool				nosib = true;
-	struct ext4_ext_cursor		*ncur = NULL;
-	int				rootdepth;
-	struct ext4_extent_header	*hdr;
-	union ext4_extent_item		*itemp;
+	int ret = 0;
+	int i;
+	ext4_lblk_t lblock;
+	bool nosib = true;
+	struct ext4_ext_cursor *ncur = NULL;
+	int rootdepth;
+	struct ext4_extent_header *hdr;
+	union ext4_extent_item *itemp;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 	hdr = (struct ext4_extent_header *)cur->c_paths[depth].p_data;
@@ -1431,13 +1431,13 @@ out:
 int
 ext4_ext_decrement(struct ext4_ext_cursor *cur, bool *noprevp)
 {
-	int			ret = 0;
-	int			i;
-	int			depth;
-	ssize_t			ptr;
-	bool			noprev = true;
-	int			rootdepth;
-	struct super_block	*sb;
+	int ret = 0;
+	int i;
+	int depth;
+	ssize_t ptr;
+	bool noprev = true;
+	int rootdepth;
+	struct super_block *sb;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 	sb = cur->c_superblock;
@@ -1456,8 +1456,8 @@ ext4_ext_decrement(struct ext4_ext_cursor *cur, bool *noprevp)
 
 	cur->c_paths[depth].p_ptr--;
 	for (i = depth - 1; i >= 0; i--) {
-		int			   udepth = i + 1;
-		struct ext4_ext_path       npath = {0};
+		int udepth = i + 1;
+		struct ext4_ext_path npath = {0};
 		struct ext4_extent_header *hdr =
 		    (struct ext4_extent_header *)cur->c_paths[udepth].p_data;
 		struct ext4_extent_idx *idx =
@@ -1498,13 +1498,13 @@ out:
 int
 ext4_ext_increment(struct ext4_ext_cursor *cur, bool *nonextp)
 {
-	int			ret = 0;
-	int			i;
-	int			depth;
-	ssize_t			ptr;
-	bool			nonext = true;
-	int			rootdepth;
-	struct super_block	*sb;
+	int ret = 0;
+	int i;
+	int depth;
+	ssize_t ptr;
+	bool nonext = true;
+	int rootdepth;
+	struct super_block *sb;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 	sb = cur->c_superblock;
@@ -1523,8 +1523,8 @@ ext4_ext_increment(struct ext4_ext_cursor *cur, bool *nonextp)
 
 	cur->c_paths[depth].p_ptr++;
 	for (i = depth - 1; i >= 0; i--) {
-		int			   udepth = i + 1;
-		struct ext4_ext_path       npath = {0};
+		int udepth = i + 1;
+		struct ext4_ext_path npath = {0};
 		struct ext4_extent_header *hdr =
 		    (struct ext4_extent_header *)cur->c_paths[udepth].p_data;
 		struct ext4_extent_idx *idx =
@@ -1562,10 +1562,10 @@ out:
 int
 ext4_ext_reload_paths(struct ext4_ext_cursor *cur, int depth)
 {
-	int				ret = 0;
-	int				i;
-	struct ext4_extent_header	*hdr;
-	struct super_block		*sb;
+	int ret = 0;
+	int i;
+	struct ext4_extent_header *hdr;
+	struct super_block *sb;
 
 	sb = cur->c_superblock;
 	hdr = (struct ext4_extent_header *)cur->c_paths[depth].p_data;
@@ -1574,7 +1574,7 @@ ext4_ext_reload_paths(struct ext4_ext_cursor *cur, int depth)
 		cur->c_paths[depth].p_ptr = ext4_ext_header_entries(hdr) - 1;
 
 	for (i = depth - 1; i >= 0; i--) {
-		int		     udepth = i + 1;
+		int udepth = i + 1;
 		struct ext4_ext_path npath = {0};
 		hdr = (struct ext4_extent_header *)cur->c_paths[udepth].p_data;
 		struct ext4_extent_idx *idx =
@@ -1623,14 +1623,14 @@ static int
 ext4_ext_try_merge_left(struct ext4_ext_cursor *cur, int depth,
 			struct ext4_ext_cursor **ncurp, int *mergedp)
 {
-	int				ret;
-	bool				nosib;
-	int				merged = 0;
-	uint16_t			nritems;
-	uint16_t			snritems;
-	struct ext4_ext_cursor		*ncur = NULL;
-	struct ext4_extent_header	*hdr;
-	struct ext4_extent_header	*shdr;
+	int ret;
+	bool nosib;
+	int merged = 0;
+	uint16_t nritems;
+	uint16_t snritems;
+	struct ext4_ext_cursor *ncur = NULL;
+	struct ext4_extent_header *hdr;
+	struct ext4_extent_header *shdr;
 
 	*ncurp = NULL;
 	*mergedp = 0;
@@ -1680,14 +1680,14 @@ static int
 ext4_ext_try_merge_right(struct ext4_ext_cursor *cur, int depth,
 			 struct ext4_ext_cursor **ncurp, int *mergedp)
 {
-	int				ret;
-	bool				nosib;
-	int				merged = 0;
-	uint16_t			nritems;
-	uint16_t			snritems;
-	struct ext4_ext_cursor		*ncur = NULL;
-	struct ext4_extent_header	*hdr;
-	struct ext4_extent_header	*shdr;
+	int ret;
+	bool nosib;
+	int merged = 0;
+	uint16_t nritems;
+	uint16_t snritems;
+	struct ext4_ext_cursor *ncur = NULL;
+	struct ext4_extent_header *hdr;
+	struct ext4_extent_header *shdr;
 
 	*ncurp = NULL;
 	*mergedp = 0;
@@ -1738,7 +1738,7 @@ static int
 ext4_ext_try_merge(struct ext4_ext_cursor *cur, int depth,
 		   struct ext4_ext_cursor **ncurp, int *mergedp)
 {
-	int	ret;
+	int ret;
 
 	ret = ext4_ext_try_merge_left(cur, depth, ncurp, mergedp);
 	if (ret || *mergedp)
@@ -1761,11 +1761,11 @@ ext4_ext_try_merge(struct ext4_ext_cursor *cur, int depth,
 static int
 __ext4_ext_delete(struct ext4_ext_cursor *cur, int depth, int *retdepthp)
 {
-	int				ret = 0;
-	uint16_t			nritems;
-	int				i;
-	int				rootdepth;
-	struct ext4_extent_header	*hdr;
+	int ret = 0;
+	uint16_t nritems;
+	int i;
+	int rootdepth;
+	struct ext4_extent_header *hdr;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 	hdr = (struct ext4_extent_header *)cur->c_paths[depth].p_data;
@@ -1824,15 +1824,15 @@ __ext4_ext_delete(struct ext4_ext_cursor *cur, int depth, int *retdepthp)
 static int
 ext4_ext_shrinkable(struct ext4_ext_cursor *cur, bool *shrinkablep)
 {
-	int				ret = 0;
-	int				i = 0;
-	int				maxnritems;
-	int				nritems;
-	int				nnritems = 0;
-	int				rootdepth;
-	struct ext4_extent_header	*hdr;
-	struct ext4_ext_cursor		*ncur = NULL;
-	bool				shrinkable = false;
+	int ret = 0;
+	int i = 0;
+	int maxnritems;
+	int nritems;
+	int nnritems = 0;
+	int rootdepth;
+	struct ext4_extent_header *hdr;
+	struct ext4_ext_cursor *ncur = NULL;
+	bool shrinkable = false;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 	hdr = cur->c_root;
@@ -1853,8 +1853,8 @@ ext4_ext_shrinkable(struct ext4_ext_cursor *cur, bool *shrinkablep)
 	nritems = ext4_ext_header_entries(hdr);
 
 	for (i = 0; i < nritems; i++) {
-		bool			   nosib;
-		struct ext4_ext_cursor *   tcur;
+		bool nosib;
+		struct ext4_ext_cursor *tcur;
 		struct ext4_extent_header *nhdr =
 		    (struct ext4_extent_header *)cur->c_paths[rootdepth - 1]
 			.p_data;
@@ -1893,18 +1893,18 @@ out:
 static int
 __ext4_ext_shrink(struct ext4_ext_cursor *cur)
 {
-	int				ret;
-	int				i = 0;
-	ssize_t				ptr = -1;
-	int				maxnritems;
-	int				tnritems = 0;
-	int				nritems;
-	struct ext4_extent_header	*hdr;
-	struct ext4_extent_header	*thdr = NULL;
-	int				rootdepth;
-	struct ext4_ext_cursor		*ncur = NULL;
-	union ext4_extent_item		*titemp;
-	struct ext4_extent_idx		*idx;
+	int ret;
+	int i = 0;
+	ssize_t ptr = -1;
+	int maxnritems;
+	int tnritems = 0;
+	int nritems;
+	struct ext4_extent_header *hdr;
+	struct ext4_extent_header *thdr = NULL;
+	int rootdepth;
+	struct ext4_ext_cursor *ncur = NULL;
+	union ext4_extent_item *titemp;
+	struct ext4_extent_idx *idx;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 	if (!rootdepth)
@@ -1931,9 +1931,9 @@ __ext4_ext_shrink(struct ext4_ext_cursor *cur)
 	titemp = EXT_FIRST_ITEM(thdr);
 
 	for (i = 0; i < nritems; i++) {
-		bool			   nosib;
-		int			   nnritems;
-		struct ext4_ext_cursor *   tcur;
+		bool nosib;
+		int nnritems;
+		struct ext4_ext_cursor *tcur;
 		struct ext4_extent_header *nhdr =
 		    (struct ext4_extent_header *)cur->c_paths[rootdepth - 1]
 			.p_data;
@@ -1997,8 +1997,8 @@ out:
 static int
 ext4_ext_tree_shrink(struct ext4_ext_cursor *cur)
 {
-	int	ret;
-	bool	shrinkable;
+	int ret;
+	bool shrinkable;
 
 	ret = ext4_ext_shrinkable(cur, &shrinkable);
 	if (ret)
@@ -2057,11 +2057,11 @@ ext4_ext_print_path(struct ext4_ext_cursor *cur)
 int
 ext4_ext_delete(struct ext4_ext_cursor *cur)
 {
-	int			ret = 0;
-	int			merged = 0;
-	struct ext4_ext_cursor	*ncur = NULL;
-	int			depth = 0;
-	int			rootdepth;
+	int ret = 0;
+	int merged = 0;
+	struct ext4_ext_cursor *ncur = NULL;
+	int depth = 0;
+	int rootdepth;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 
