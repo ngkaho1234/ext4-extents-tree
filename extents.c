@@ -1967,7 +1967,10 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 
 	for (i = 0; i <= rootdepth; i++) {
 		int merged = 0;
+		ssize_t ptr;
 		struct ext4_ext_cursor *ncur;
+		struct ext4_extent_idx *idx;
+		struct ext4_extent_header *uhdr;
 
 		hdr = cur->c_paths[i].p_hdr;
 
@@ -2036,26 +2039,20 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 		 *
 		 * At the next iteration we delete the key of the node.
 		 */
-		if (merged || !nritems) {
-			ssize_t ptr;
-			struct ext4_extent_idx *idx;
-			struct ext4_extent_header *uhdr;
-			
-			/*
-			 * Get the respective key in parent node.
-			 */
-			uhdr = cur->c_paths[i + 1].p_hdr;
-			ptr = cur->c_paths[i + 1].p_ptr;
-			idx = EXT_FIRST_INDEX(uhdr) + ptr;
 
-			/*
-			 * Unpin the buffer of this node, and free
-			 * the block of it.
-			 */
-			ext4_ext_cursor_unpin(cur, i, 1);
-			cur->c_cursor_op.c_free_block_func(cur,
-							   ext4_idx_block(idx));
-		}
+		/*
+		 * Get the respective key in parent node.
+		 */
+		uhdr = cur->c_paths[i + 1].p_hdr;
+		ptr = cur->c_paths[i + 1].p_ptr;
+		idx = EXT_FIRST_INDEX(uhdr) + ptr;
+
+		/*
+		 * Unpin the buffer of this node, and free
+		 * the block of it.
+		 */
+		ext4_ext_cursor_unpin(cur, i, 1);
+		cur->c_cursor_op.c_free_block_func(cur, ext4_idx_block(idx));
 	}
 	if (i < rootdepth) {
 		/*
