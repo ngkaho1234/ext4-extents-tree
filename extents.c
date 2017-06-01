@@ -141,14 +141,14 @@ extcursor_free_block(struct ext4_ext_cursor *cur, ext4_fsblk_t block)
 /*
  * ext4_ext_in_range -	Check whether @b provided is within the range
  * 			of an extent
- * @b:		Block number
+ * @lblock:	Logical Block number
  * @first:	Starting logical block of an extent
  * @len:	Length of an extent
  *
- * Return true if @first <= @b < @first + @len
+ * Return true if @first <= @lblock < @first + @len
  */
-#define ext4_ext_in_range(b, first, len)                                       \
-	((b) >= (first) && (b) <= (first) + (len)-1)
+#define ext4_ext_in_range(lblock, first, len)                                       \
+	((lblock) >= (first) && (lblock) <= (first) + (len)-1)
 
 /*
  * ext4_ext_header_depth -	Return the level of a node
@@ -819,14 +819,14 @@ ext4_ext_node_lblock(struct ext4_extent_header *hdr)
  *
  * @cur:	Cursor to an extent tree
  * @depth:	The level of the node to be split
- * @nblock:	A new block provided by caller
+ * @nblocknr:	A new block provided by caller
  * @pathp:	Path to store buffer and pointer if path replacement will take
  * 		place in @cur
  *
  * Return 0 on success, or return values of fs_bwrite().
  */
 static int
-ext4_ext_split_node(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblock,
+ext4_ext_split_node(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblocknr,
 		    struct ext4_ext_path *pathp)
 {
 	int ret;
@@ -846,7 +846,7 @@ ext4_ext_split_node(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblock,
 	ptr = cur->c_paths[depth].p_ptr;
 	sb = cur->c_superblock;
 
-	nbcb = fs_bwrite(sb, nblock, &ret);
+	nbcb = fs_bwrite(sb, nblocknr, &ret);
 	if (ret)
 		return ret;
 
@@ -887,13 +887,13 @@ ext4_ext_split_node(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblock,
  *
  * @cur:	Cursor to an extent tree
  * @depth:	The level of the tree root
- * @nblock:	A new block provided by caller
+ * @nblocknr:	A new block provided by caller
  * @pathp:	Path to store buffer and pointer
  *
  * Return 0 on success, or return values of fs_bwrite().
  */
 static int
-ext4_ext_tree_grow(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblock,
+ext4_ext_tree_grow(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblocknr,
 		   struct ext4_ext_path *pathp)
 {
 	int ret;
@@ -909,7 +909,7 @@ ext4_ext_tree_grow(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblock,
 
 	sb = cur->c_superblock;
 
-	nbcb = fs_bwrite(sb, nblock, &ret);
+	nbcb = fs_bwrite(sb, nblocknr, &ret);
 	if (ret)
 		return ret;
 
@@ -1101,7 +1101,7 @@ static int
 ext4_ext_ensure_unfull(struct ext4_ext_cursor *cur)
 {
 	int ret = 0;
-	ext4_fsblk_t *nblocks = NULL;
+	ext4_fsblk_t *nblocknrs = NULL;
 	int rootdepth;
 	int nrlevel;
 	int nrallocs = 0;
@@ -1115,15 +1115,15 @@ ext4_ext_ensure_unfull(struct ext4_ext_cursor *cur)
 		ext4_lblk_t prlblock;
 		union ext4_extent_item nitems;
 
-		nblocks =
+		nblocknrs =
 		    (ext4_fsblk_t *)ext4_malloc(nrlevel * sizeof(ext4_fsblk_t));
-		if (!nblocks) {
+		if (!nblocknrs) {
 			ret = ENOMEM;
 			goto out;
 		}
 		for (i = 0; i < nrlevel; i++, nrallocs++) {
 			ret = cur->c_cursor_op.c_alloc_block_func(cur,
-								  nblocks + i);
+								  nblocknrs + i);
 			if (ret)
 				goto out;
 		}
@@ -1133,12 +1133,12 @@ ext4_ext_ensure_unfull(struct ext4_ext_cursor *cur)
 			struct ext4_ext_path path;
 
 			if (i < rootdepth) {
-				ret = ext4_ext_split_node(cur, i, nblocks[i],
+				ret = ext4_ext_split_node(cur, i, nblocknrs[i],
 							  &path);
 				if (ret)
 					goto out;
 			} else {
-				ret = ext4_ext_tree_grow(cur, i, nblocks[i],
+				ret = ext4_ext_tree_grow(cur, i, nblocknrs[i],
 							 &path);
 				if (ret)
 					goto out;
@@ -1159,7 +1159,7 @@ ext4_ext_ensure_unfull(struct ext4_ext_cursor *cur)
 			if (i) {
 				memset(&nitems, 0, EXT4_EXT_ITEM_SIZE);
 				ext4_idx_store_lblock(&nitems.i, prlblock);
-				ext4_idx_store_block(&nitems.i, nblocks[i - 1]);
+				ext4_idx_store_block(&nitems.i, nblocknrs[i - 1]);
 				ext4_ext_insert_item(cur, i, &nitems,
 						     pptr != -1);
 			}
@@ -1168,20 +1168,20 @@ ext4_ext_ensure_unfull(struct ext4_ext_cursor *cur)
 		}
 		memset(&nitems, 0, EXT4_EXT_ITEM_SIZE);
 		ext4_idx_store_lblock(&nitems.i, prlblock);
-		ext4_idx_store_block(&nitems.i, nblocks[i - 1]);
+		ext4_idx_store_block(&nitems.i, nblocknrs[i - 1]);
 		ext4_ext_insert_item(cur, i, &nitems, pptr != -1);
 	}
 
 out:
-	if (nblocks) {
+	if (nblocknrs) {
 		if (ret) {
 			uint16_t i = nrallocs;
 
 			while (i--)
 				cur->c_cursor_op.c_free_block_func(cur,
-								   nblocks[i]);
+								   nblocknrs[i]);
 		}
-		ext4_free(nblocks);
+		ext4_free(nblocknrs);
 	}
 
 	return ret;
