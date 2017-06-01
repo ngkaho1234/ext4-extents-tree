@@ -519,7 +519,10 @@ ext4_ext_cursor_unpin(struct ext4_ext_cursor *cur, int depth, int nrlevel)
 
 /*
  * ext4_ext_cursor_reset_rootpath -	Resize the paths array in the cursor and
- * 					reset the root level of the paths array
+ * 					reset the root level of the paths array.
+ * 					This routine will always succeed if path
+ * 					array size is being shrunk or remains
+ * 					the same.
  *
  * @cur:	Cursor to an extent tree
  *
@@ -552,27 +555,6 @@ ext4_ext_cursor_reset_rootpath(struct ext4_ext_cursor *cur)
 	cur->c_paths[rootdepth].p_hdr = cur->c_root;
 	cur->c_paths[rootdepth].p_ptr = -1;
 	return 0;
-}
-
-/*
- * ext4_ext_cursor_swap_paths -	Swap paths between two cursors
- */
-void
-ext4_ext_cursor_swap_paths(struct ext4_ext_cursor *a, struct ext4_ext_cursor *b,
-			   int depth, int nrlevel)
-{
-	int i;
-	int maxdepth;
-
-	maxdepth = a->c_maxdepth;
-
-	for (i = depth; i <= maxdepth && i < depth + nrlevel; i++) {
-		struct ext4_ext_path tmp;
-
-		tmp = a->c_paths[i];
-		a->c_paths[i] = b->c_paths[i];
-		b->c_paths[i] = tmp;
-	}
 }
 
 /*
@@ -1153,20 +1135,19 @@ ext4_ext_ensure_unfull(struct ext4_ext_cursor *cur)
 			if (i < rootdepth) {
 				ret = ext4_ext_split_node(cur, i, nblocks[i],
 							  &path);
+				if (ret)
+					goto out;
 			} else {
 				ret = ext4_ext_tree_grow(cur, i, nblocks[i],
 							 &path);
-				if (!ret) {
-					rootdepth++;
-					ret =
-					    ext4_ext_cursor_reset_rootpath(cur);
-					if (ret)
-						goto out;
-					cur->c_paths[rootdepth].p_ptr = 0;
-				}
+				if (ret)
+					goto out;
+				rootdepth++;
+				ret = ext4_ext_cursor_reset_rootpath(cur);
+				if (ret)
+					goto out;
+				cur->c_paths[rootdepth].p_ptr = 0;
 			}
-			if (ret)
-				goto out;
 			ptr = path.p_ptr;
 			rlblock = ext4_ext_node_lblock(path.p_hdr);
 			if (path.p_ptr != -1) {
@@ -1950,34 +1931,6 @@ ext4_ext_tree_shrink(struct ext4_ext_cursor *cur)
 	return ret;
 }
 
-#if 0
-static void
-ext4_ext_print_path(struct ext4_ext_cursor *cur)
-{
-	int depth, rootdepth = ext4_ext_cursor_depth(cur);
-
-	printf_flush("--------------\n");
-	for (depth = 0; depth <= rootdepth; depth++) {
-		if (cur->c_paths[depth].p_hdr) {
-			struct ext4_extent_header *hdr =
-					cur->c_paths[depth].p_hdr;
-			union ext4_extent_item *itemp = EXT_FIRST_ITEM(hdr) + cur->c_paths[depth].p_ptr;
-
-			printf_flush(
-					"[%hu] ptr: <%ld> buf_blocknr: <%llu> item_index: <%u> item_block: <%llu>\n",
-					depth,
-					cur->c_paths[depth].p_ptr,
-					(depth < rootdepth)?ext4_buf_blocknr(cur->c_paths[depth].p_bcb):-1ULL,
-					(depth)?ext4_idx_lblock(&itemp->i):ext4_ext_lblock(&itemp->e),
-					(depth)?ext4_idx_block(&itemp->i):ext4_ext_block(&itemp->e));
-		}
-	}
-	printf_flush("--------------\n");
-}
-#else
-#define ext4_ext_print_path(cur) ((void)(cur))
-#endif
-
 /*
  * ext4_ext_delete -	Delete an extent from an extent tree pointed to by
  * 			item pointer in the leaf. Nodes may be merged
@@ -2045,7 +1998,7 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 
 				/*
 				 * After merging to left sibling,
-				 * we need not to update the first keys of the
+				 * we need not to update the first key of the
 				 * left sibling at every level.
 				 */
 
@@ -2058,8 +2011,9 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 
 				/*
 				 * After merging to right sibling,
-				 * we need to update the first keys of the
-				 * right sibling at every level.
+				 * we need to update the first key of the
+				 * right sibling at every level until we
+				 * meet a non-leftmost key.
 				 */
 				ext4_ext_update_index(ncur, i);
 
@@ -2085,14 +2039,14 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 		if (merged || !nritems) {
 			ssize_t ptr;
 			struct ext4_extent_idx *idx;
-			struct ext4_extent_header *phdr;
+			struct ext4_extent_header *uhdr;
 			
 			/*
 			 * Get the respective key in parent node.
 			 */
-			phdr = cur->c_paths[i + 1].p_hdr;
+			uhdr = cur->c_paths[i + 1].p_hdr;
 			ptr = cur->c_paths[i + 1].p_ptr;
-			idx = EXT_FIRST_INDEX(phdr) + ptr;
+			idx = EXT_FIRST_INDEX(uhdr) + ptr;
 
 			/*
 			 * Unpin the buffer of this node, and free
@@ -2103,18 +2057,31 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 							   ext4_idx_block(idx));
 		}
 	}
-	if (i < rootdepth)
+	if (i < rootdepth) {
+		/*
+		 * We might have removed the leftmost key in the node,
+		 * so we need to update the first key of the right
+		 * sibling at every level until we meet a non-leftmost
+		 * key.
+		 */
 		ext4_ext_update_index(cur, i);
-	else {
+	} else {
 		if (!ext4_ext_tree_empty(cur)) {
-			ext4_ext_reload_paths(cur, rootdepth);
+			/*
+			 * Reload the cursor's path so that it points to
+			 * a valid key again.
+			 */
+			ext4_ext_reload_paths(cur, i);
 			ret = ext4_ext_tree_shrink(cur);
 		} else {
-			hdr = (struct ext4_extent_header *)cur->c_root;
+			/*
+			 * For empty root we need to make sure that the
+			 * depth of the root level is 0.
+			 */
+			hdr = cur->c_root;
 			ext4_ext_header_set_depth(hdr, 0);
 			cur->c_cursor_op.c_root_dirty_func(cur);
 			ext4_ext_cursor_unpin(cur, rootdepth, 1);
-			ext4_ext_cursor_reset_rootpath(cur);
 		}
 	}
 
