@@ -950,9 +950,10 @@ ext4_ext_tree_grow(struct ext4_ext_cursor *cur, int depth, ext4_fsblk_t nblocknr
  *
  * @cur:	Cursor to an extent tree
  * @depth:	The level to start updating the indice at
+ * @force:	Force to update along all the levels to the root
  */
 static void
-ext4_ext_update_index(struct ext4_ext_cursor *cur, int depth)
+ext4_ext_update_index(struct ext4_ext_cursor *cur, int depth, int force)
 {
 	int i;
 	int rootdepth;
@@ -982,9 +983,8 @@ ext4_ext_update_index(struct ext4_ext_cursor *cur, int depth)
 					    cur->c_paths[i].p_bcb);
 				else
 					cur->c_cursor_op.c_root_dirty_func(cur);
-			} else {
+			} else if (!force)
 				break;
-			}
 		} else {
 			struct ext4_extent_idx *idx =
 			    EXT_FIRST_INDEX(hdr) + ptr;
@@ -999,9 +999,8 @@ ext4_ext_update_index(struct ext4_ext_cursor *cur, int depth)
 					    cur->c_paths[i].p_bcb);
 				else
 					cur->c_cursor_op.c_root_dirty_func(cur);
-			} else {
+			} else if (!force)
 				break;
-			}
 		}
 	}
 }
@@ -1205,7 +1204,7 @@ ext4_ext_insert(struct ext4_ext_cursor *cur, struct ext4_extent *next)
 		return ret;
 
 	ext4_ext_insert_item(cur, 0, (union ext4_extent_item *)next, true);
-	ext4_ext_update_index(cur, 0);
+	ext4_ext_update_index(cur, 0, 0);
 	return 0;
 }
 
@@ -1932,6 +1931,256 @@ ext4_ext_tree_shrink(struct ext4_ext_cursor *cur)
 }
 
 /*
+ * ext4_ext_delete_leaf
+ */
+static int
+ext4_ext_delete_leaf(struct ext4_ext_cursor *cur,
+		     ext4_lblk_t tolblk,
+		     int *depthp,
+		     int *stopp)
+{
+	int ret = 0;
+	ssize_t ptr;
+	uint16_t nritems;
+	struct ext4_extent *ext;
+	struct ext4_extent_header *hdr;
+
+	*stopp = 0;
+
+	while (1) {
+		ptr = cur->c_paths[0].p_ptr;
+		hdr = cur->c_paths[0].p_hdr;
+		nritems = ext4_ext_header_entries(hdr);
+
+		ext4_assert(nritems > 0);
+
+		/*
+		 * We have to stop if the extent's key
+		 * is greater than @tolblk.
+		 *
+		 * TODO: What about being more precise?
+		 */
+		ext = EXT_FIRST_EXTENT(hdr) + ptr;
+		if (ext4_ext_lblock(ext) > tolblk) {
+			*stopp = 1;
+			break;
+		}
+
+		/*
+		 * Delete the extent pointed to by the path.
+		 */
+		ext4_ext_delete_item(cur, 0);
+		nritems--;
+
+		/*
+		 * TODO: Unmap the underlying blocks!
+		 */
+
+		/*
+		 * If there are no more items we could delete,
+		 * we have to go to one level above to switch to the
+		 * next leaf.
+		 */
+		if (ptr >= nritems) {
+			/*
+			 * Go to one level above
+			 */
+			(*depthp)++;
+			break;
+		}
+	}
+	return ret;
+}
+
+/*
+ * ext4_ext_delete_node
+ */
+static int
+ext4_ext_delete_node(struct ext4_ext_cursor *cur,
+		     int *depthp)
+{
+	int ret = 0;
+	ssize_t ptr;
+	uint16_t nritems;
+	ext4_fsblk_t blocknr;
+	struct ext4_extent_idx *idx;
+	struct ext4_extent_header *hdr;
+	int depth = *depthp;
+
+	/*
+	 * If we leave nothing in the node after
+	 * deletion of an item, we free the block and
+	 * delete the index of the node.
+	 */
+
+	/*
+	 * Get the respective key of the node in the
+	 * parent level
+	 */
+	hdr = cur->c_paths[depth].p_hdr;
+	nritems = ext4_ext_header_entries(hdr);
+	ext4_assert(nritems > 0);
+	ptr = cur->c_paths[depth].p_ptr;
+	idx = EXT_FIRST_INDEX(hdr) + ptr;
+	blocknr = ext4_idx_block(idx);
+
+	/*
+	 * Delete the index pointed to by the path.
+	 */
+	ext4_ext_delete_item(cur, depth);
+	nritems--;
+
+	/*
+	 * Free the block of it.
+	 */
+	cur->c_cursor_op.c_free_block_func(cur, blocknr);
+
+	if (ptr >= nritems) {
+		/*
+		 * Go to one level above
+		 */
+		depth++;
+	} else {
+		ret = ext4_ext_reload_paths(cur, depth);
+		if (ret)
+			goto out;
+		/*
+		 * Go to the bottom level (aka the leaf).
+		 */
+		depth = 0;
+	}
+
+	*depthp = depth;
+out:
+	return ret;
+}
+
+
+/*
+ * ext4_ext_delete -	Delete an extent from an extent tree pointed to by
+ * 			item pointer in the leaf. Nodes may be merged
+ * 			together to balance the tree
+ *
+ * @cur:	Cursor to an extent tree
+ *
+ * Return 0 on success, or ENOENT if there is no item to be deleted.
+ * Cursor MUST be discarded after deletion.
+ */
+int
+ext4_ext_delete_range(struct ext4_ext_cursor *cur,
+		      ext4_lblk_t tolblk)
+{
+	int ret = 0;
+	uint16_t nritems;
+	int i = 0;
+	int rootdepth;
+	struct ext4_extent_header *hdr;
+
+	rootdepth = ext4_ext_cursor_depth(cur);
+	hdr = cur->c_paths[0].p_hdr;
+
+	/*
+	 * We return ENOENT as error if we found the buffer of the lowest
+	 * level is unpinned, have no entries in it, or the pointer being
+	 * out-of-range.
+	 */
+	if (!hdr || !ext4_ext_header_entries(hdr))
+		return ENOENT;
+	if (cur->c_paths[0].p_ptr == -1)
+		return ENOENT;
+	if (cur->c_paths[0].p_ptr >= ext4_ext_header_entries(hdr))
+		return ENOENT;
+
+	while (i <= rootdepth) {
+		ssize_t ptr;
+
+		if (!i) {
+			int stop;
+
+			ret = ext4_ext_delete_leaf(cur, tolblk,
+						   &i,
+						   &stop);
+			if (ret)
+				goto out;
+
+			if (stop)
+				break;
+			continue;
+		}
+
+		/*
+		 * If we are deleting item at the root level just now,
+		 * we are done.
+		 */
+		if (i > rootdepth)
+			break;
+
+		hdr = cur->c_paths[i - 1].p_hdr;
+		nritems = ext4_ext_header_entries(hdr);
+
+		/*
+		 * Now we don't need the children path anymore.
+		 */
+		ext4_ext_cursor_unpin(cur, i - 1, 1);
+		if (!nritems) {
+			ret = ext4_ext_delete_node(cur, &i);
+			if (ret)
+				goto out;
+		} else {
+			hdr = cur->c_paths[i].p_hdr;
+			nritems = ext4_ext_header_entries(hdr);
+			ptr = cur->c_paths[i].p_ptr;
+
+			if (ptr == nritems - 1) {
+				/*
+				 * Go to one level above
+				 */
+				i++;
+			} else {
+				cur->c_paths[i].p_ptr = ++ptr;
+				ret = ext4_ext_reload_paths(cur, i);
+				if (ret)
+					goto out;
+				/*
+				 * Go to the bottom level (aka the leaf).
+				 */
+				i = 0;
+			}
+		}
+	}
+	if (i < rootdepth) {
+		/*
+		 * We might have removed the leftmost key in the node,
+		 * so we need to update the first key of the right
+		 * sibling at every level until we meet a non-leftmost
+		 * key.
+		 */
+		ext4_ext_update_index(cur, i, 1);
+	} else {
+		if (!ext4_ext_tree_empty(cur)) {
+			/*
+			 * Reload the cursor's path so that it points to
+			 * a valid key again.
+			 */
+			ext4_ext_reload_paths(cur, i);
+			ret = ext4_ext_tree_shrink(cur);
+		} else {
+			/*
+			 * For empty root we need to make sure that the
+			 * depth of the root level is 0.
+			 */
+			hdr = cur->c_root;
+			ext4_ext_header_set_depth(hdr, 0);
+			cur->c_cursor_op.c_root_dirty_func(cur);
+			ext4_ext_cursor_unpin(cur, rootdepth, 1);
+		}
+	}
+
+out:
+	return ret;
+}
+
+/*
  * ext4_ext_delete -	Delete an extent from an extent tree pointed to by
  * 			item pointer in the leaf. Nodes may be merged
  * 			together to balance the tree
@@ -2018,7 +2267,7 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 				 * right sibling at every level until we
 				 * meet a non-leftmost key.
 				 */
-				ext4_ext_update_index(ncur, i);
+				ext4_ext_update_index(ncur, i, 0);
 
 				/*
 				 * Throw away the cursor to sibling.
@@ -2061,7 +2310,7 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 		 * sibling at every level until we meet a non-leftmost
 		 * key.
 		 */
-		ext4_ext_update_index(cur, i);
+		ext4_ext_update_index(cur, i, 0);
 	} else {
 		if (!ext4_ext_tree_empty(cur)) {
 			/*
