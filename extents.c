@@ -1806,7 +1806,7 @@ out:
 static int
 __ext4_ext_shrink(struct ext4_ext_cursor *cur)
 {
-	int ret;
+	int ret = 0;
 	int i = 0;
 	ssize_t ptr = -1;
 	int maxnritems;
