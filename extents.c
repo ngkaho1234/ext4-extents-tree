@@ -2137,21 +2137,31 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 			}
 		}
 	}
-	if (i < rootdepth) {
+
+	/*
+	 * The above code can only exit in either situations:
+	 *
+	 * 1. We found that there is no more extents at the right
+	 * 2. We found that the next extent has key larger than @tolblk
+	 */
+	ext4_assert(!i || i == rootdepth + 1);
+	if (!i) {
 		/*
 		 * We might have removed the leftmost key in the node,
 		 * so we need to update the first key of the right
 		 * sibling at every level until we meet a non-leftmost
 		 * key.
 		 */
-		ext4_ext_update_index(cur, i, 1);
+		ext4_ext_update_index(cur, 0, 1);
 	} else {
 		if (!ext4_ext_tree_empty(cur)) {
 			/*
 			 * Reload the cursor's path so that it points to
 			 * a valid key again.
 			 */
-			ext4_ext_reload_paths(cur, i);
+			ret = ext4_ext_reload_paths(cur, rootdepth);
+			if (ret)
+				goto out;
 			ret = ext4_ext_tree_shrink(cur);
 		} else {
 			/*
@@ -2162,6 +2172,7 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 			ext4_ext_header_set_depth(hdr, 0);
 			cur->c_cursor_op.c_root_dirty_func(cur);
 			ext4_ext_cursor_unpin(cur, rootdepth, 1);
+			ext4_ext_cursor_reset_rootpath(cur);
 		}
 	}
 
