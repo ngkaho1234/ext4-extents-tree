@@ -2020,7 +2020,6 @@ ext4_ext_delete_node(struct ext4_ext_cursor *cur,
 	 */
 	cur->c_cursor_op.c_free_block_func(cur, blocknr);
 
-out:
 	return ret;
 }
 
