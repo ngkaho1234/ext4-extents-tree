@@ -1936,7 +1936,6 @@ ext4_ext_tree_shrink(struct ext4_ext_cursor *cur)
 static int
 ext4_ext_delete_leaf(struct ext4_ext_cursor *cur,
 		     ext4_lblk_t tolblk,
-		     int *depthp,
 		     int *stopp)
 {
 	int ret = 0;
@@ -1977,17 +1976,10 @@ ext4_ext_delete_leaf(struct ext4_ext_cursor *cur,
 		 */
 
 		/*
-		 * If there are no more items we could delete,
-		 * we have to go to one level above to switch to the
-		 * next leaf.
+		 * There are no more items we could delete.
 		 */
-		if (ptr >= nritems) {
-			/*
-			 * Go to one level above
-			 */
-			(*depthp)++;
+		if (ptr >= nritems)
 			break;
-		}
 	}
 	return ret;
 }
@@ -1997,15 +1989,13 @@ ext4_ext_delete_leaf(struct ext4_ext_cursor *cur,
  */
 static int
 ext4_ext_delete_node(struct ext4_ext_cursor *cur,
-		     int *depthp)
+		     int depth)
 {
 	int ret = 0;
 	ssize_t ptr;
-	uint16_t nritems;
 	ext4_fsblk_t blocknr;
 	struct ext4_extent_idx *idx;
 	struct ext4_extent_header *hdr;
-	int depth = *depthp;
 
 	/*
 	 * If we leave nothing in the node after
@@ -2018,8 +2008,7 @@ ext4_ext_delete_node(struct ext4_ext_cursor *cur,
 	 * parent level
 	 */
 	hdr = cur->c_paths[depth].p_hdr;
-	nritems = ext4_ext_header_entries(hdr);
-	ext4_assert(nritems > 0);
+	ext4_assert(ext4_ext_header_entries(hdr) > 0);
 	ptr = cur->c_paths[depth].p_ptr;
 	idx = EXT_FIRST_INDEX(hdr) + ptr;
 	blocknr = ext4_idx_block(idx);
@@ -2028,29 +2017,12 @@ ext4_ext_delete_node(struct ext4_ext_cursor *cur,
 	 * Delete the index pointed to by the path.
 	 */
 	ext4_ext_delete_item(cur, depth);
-	nritems--;
 
 	/*
 	 * Free the block of it.
 	 */
 	cur->c_cursor_op.c_free_block_func(cur, blocknr);
 
-	if (ptr >= nritems) {
-		/*
-		 * Go to one level above
-		 */
-		depth++;
-	} else {
-		ret = ext4_ext_reload_paths(cur, depth);
-		if (ret)
-			goto out;
-		/*
-		 * Go to the bottom level (aka the leaf).
-		 */
-		depth = 0;
-	}
-
-	*depthp = depth;
 out:
 	return ret;
 }
@@ -2098,22 +2070,20 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 			int stop;
 
 			ret = ext4_ext_delete_leaf(cur, tolblk,
-						   &i,
 						   &stop);
 			if (ret)
 				goto out;
 
 			if (stop)
 				break;
+			/*
+			 * Since there are no more items we could delete,
+			 * we have to go to one level above to switch to the
+			 * next leaf.
+			 */
+			i++;
 			continue;
 		}
-
-		/*
-		 * If we are deleting item at the root level just now,
-		 * we are done.
-		 */
-		if (i > rootdepth)
-			break;
 
 		hdr = cur->c_paths[i - 1].p_hdr;
 		nritems = ext4_ext_header_entries(hdr);
@@ -2123,9 +2093,28 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 		 */
 		ext4_ext_cursor_unpin(cur, i - 1, 1);
 		if (!nritems) {
-			ret = ext4_ext_delete_node(cur, &i);
+			hdr = cur->c_paths[i].p_hdr;
+			ptr = cur->c_paths[i].p_ptr;
+
+			ret = ext4_ext_delete_node(cur, i);
 			if (ret)
 				goto out;
+
+			nritems = ext4_ext_header_entries(hdr);
+			if (ptr >= nritems) {
+				/*
+				 * Go to one level above
+				 */
+				i++;
+			} else {
+				ret = ext4_ext_reload_paths(cur, i);
+				if (ret)
+					goto out;
+				/*
+				 * Go to the bottom level (aka the leaf).
+				 */
+				i = 0;
+			}
 		} else {
 			hdr = cur->c_paths[i].p_hdr;
 			nritems = ext4_ext_header_entries(hdr);
