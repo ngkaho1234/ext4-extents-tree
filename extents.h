@@ -277,6 +277,10 @@ int
 ext4_ext_delete(struct ext4_ext_cursor *cur);
 
 int
+ext4_ext_delete_range(struct ext4_ext_cursor *cur,
+		      ext4_lblk_t tolblk);
+
+int
 ext4_ext_decrement(struct ext4_ext_cursor *cur, bool *noprevp);
 
 int
