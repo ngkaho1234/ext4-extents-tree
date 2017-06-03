@@ -142,13 +142,13 @@ extcursor_free_block(struct ext4_ext_cursor *cur, ext4_fsblk_t block)
  * ext4_ext_in_range -	Check whether @b provided is within the range
  * 			of an extent
  * @lblock:	Logical Block number
- * @first:	Starting logical block of an extent
- * @len:	Length of an extent
+ * @ext:	An extent
  *
- * Return true if @first <= @lblock < @first + @len
+ * Return true if @ext->first <= @lblock < @ext->first + @ext->len
  */
-#define ext4_ext_in_range(lblock, first, len)                                       \
-	((lblock) >= (first) && (lblock) <= (first) + (len)-1)
+#define ext4_ext_in_range(lblock, ext)				\
+	((lblock) >= ext4_ext_lblock(ext)			\
+	 && (lblock) <= ext4_ext_lblock(ext) + ext4_ext_len(ext)-1)
 
 /*
  * ext4_ext_header_depth -	Return the level of a node
@@ -680,8 +680,7 @@ ext4_ext_binsearch_leaf(void *buf, ext4_lblk_t lblock, ssize_t *ptr)
 		mid = (lower + upper) / 2;
 		ext = EXT_FIRST_EXTENT(hdr) + mid;
 		diff = ext4_ext_lblock_cmp(lblock, ext4_ext_lblock(ext));
-		if (ext4_ext_in_range(lblock, ext4_ext_lblock(ext),
-				      ext4_ext_len(ext))) {
+		if (ext4_ext_in_range(lblock, ext)) {
 			diff = 0;
 			break;
 		} else if (diff < 0) {
@@ -761,9 +760,7 @@ ext4_ext_lookup_extent(struct ext4_ext_cursor *cur, ext4_lblk_t lblock,
 			    EXT_FIRST_EXTENT(hdr) + cur->c_paths[0].p_ptr;
 			uint16_t nritems = ext4_ext_header_entries(hdr);
 
-			if (nritems &&
-			    ext4_ext_in_range(lblock, ext4_ext_lblock(ext),
-					      ext4_ext_len(ext))) {
+			if (nritems && ext4_ext_in_range(lblock, ext)) {
 				if (notfound)
 					*notfound = false;
 			}
