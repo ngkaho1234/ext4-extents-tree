@@ -129,7 +129,7 @@ int main(int argc, char **argv)
 	if (!notfound) {
 		fprintf(stderr, "Removing extent containing block: %" PRIu32 " - %" PRIu32 "\n",
 			from, to);
-		err = ext4_ext_delete_range(cur, to);
+		err = ext4_ext_delete_range(cur, from, to);
 		if (err) {
 			fprintf(stderr, "err: %s, block: %" PRIu32 "\n",
 					strerror(err), from);

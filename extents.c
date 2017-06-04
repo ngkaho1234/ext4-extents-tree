@@ -1385,6 +1385,65 @@ out:
 }
 
 /*
+ * ext4_ext_reload_paths -	Reload the paths in a cursor
+ *
+ * @cur:	Cursor to an extent tree
+ * @depth:	The level to start the reload at
+ *
+ * Return 0 on success, EIO on currupted block, or return values of fs_bread().
+ */
+int
+ext4_ext_reload_paths(struct ext4_ext_cursor *cur, int depth)
+{
+	int ret = 0;
+	int i;
+	struct ext4_extent_header *hdr;
+	struct super_block *sb;
+
+	sb = cur->c_superblock;
+	hdr = cur->c_paths[depth].p_hdr;
+
+	if (cur->c_paths[depth].p_ptr > ext4_ext_header_entries(hdr) - 1)
+		cur->c_paths[depth].p_ptr = ext4_ext_header_entries(hdr) - 1;
+
+	for (i = depth - 1; i >= 0; i--) {
+		int udepth = i + 1;
+		struct ext4_ext_path npath;
+		struct ext4_extent_idx *idx;
+		void *data;
+
+		hdr = cur->c_paths[udepth].p_hdr;
+		idx = EXT_FIRST_INDEX(hdr) + cur->c_paths[udepth].p_ptr;
+
+		if (cur->c_paths[i].p_hdr &&
+		    ext4_buf_blocknr(cur->c_paths[i].p_bcb) ==
+			ext4_idx_block(idx)) {
+			if (cur->c_paths[i].p_ptr == -1)
+				cur->c_paths[i].p_ptr = 0;
+			continue;
+		}
+
+		ext4_ext_cursor_unpin(cur, i, 1);
+		npath.p_bcb = fs_bread(sb, ext4_idx_block(idx), &ret);
+		if (ret)
+			goto out;
+		data = npath.p_bcb->b_data;
+		npath.p_hdr = (struct ext4_extent_header *)data;
+		npath.p_ptr = 0;
+		ext4_ext_cursor_set_buf(cur, i, &npath);
+
+		hdr = npath.p_hdr;
+		if (hdr->eh_magic != EXT4_EXT_MAGIC) {
+			ret = EIO;
+			goto out;
+		}
+	}
+out:
+	return ret;
+}
+
+
+/*
  * ext4_ext_decrement -	Seek to the previous extent
  *
  * @cur:	Cursor to an extent tree
@@ -1472,11 +1531,8 @@ ext4_ext_increment(struct ext4_ext_cursor *cur, bool *nonextp)
 	ssize_t ptr;
 	bool nonext = true;
 	int rootdepth;
-	struct super_block *sb;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
-	sb = cur->c_superblock;
-
 	for (i = 0; i <= rootdepth; i++) {
 		struct ext4_extent_header *hdr;
 
@@ -1490,93 +1546,14 @@ ext4_ext_increment(struct ext4_ext_cursor *cur, bool *nonextp)
 		goto out;
 
 	cur->c_paths[depth].p_ptr++;
-	for (i = depth - 1; i >= 0; i--) {
-		int udepth = i + 1;
-		struct ext4_ext_path npath;
-		struct ext4_extent_header *hdr;
-		struct ext4_extent_idx *idx;
-		void *data;
-		
-		hdr = cur->c_paths[udepth].p_hdr;
-		idx = EXT_FIRST_INDEX(hdr) + cur->c_paths[udepth].p_ptr;
+	ret = ext4_ext_reload_paths(cur, depth);
+	if (ret)
+		goto out;
 
-		ext4_ext_cursor_unpin(cur, i, 1);
-		npath.p_bcb = fs_bread(sb, ext4_idx_block(idx), &ret);
-		if (ret)
-			goto out;
-		data = npath.p_bcb->b_data;
-		npath.p_hdr = (struct ext4_extent_header *)data;
-		npath.p_ptr = 0;
-		ext4_ext_cursor_set_buf(cur, i, &npath);
-
-		hdr = npath.p_hdr;
-		if (hdr->eh_magic != EXT4_EXT_MAGIC) {
-			ret = EIO;
-			goto out;
-		}
-	}
 	nonext = false;
 out:
 	if (nonextp)
 		*nonextp = nonext;
-	return ret;
-}
-
-/*
- * ext4_ext_reload_paths -	Reload the paths in a cursor
- *
- * @cur:	Cursor to an extent tree
- * @depth:	The level to start the reload at
- *
- * Return 0 on success, EIO on currupted block, or return values of fs_bread().
- */
-int
-ext4_ext_reload_paths(struct ext4_ext_cursor *cur, int depth)
-{
-	int ret = 0;
-	int i;
-	struct ext4_extent_header *hdr;
-	struct super_block *sb;
-
-	sb = cur->c_superblock;
-	hdr = cur->c_paths[depth].p_hdr;
-
-	if (cur->c_paths[depth].p_ptr > ext4_ext_header_entries(hdr) - 1)
-		cur->c_paths[depth].p_ptr = ext4_ext_header_entries(hdr) - 1;
-
-	for (i = depth - 1; i >= 0; i--) {
-		int udepth = i + 1;
-		struct ext4_ext_path npath;
-		struct ext4_extent_idx *idx;
-		void *data;
-
-		hdr = cur->c_paths[udepth].p_hdr;
-		idx = EXT_FIRST_INDEX(hdr) + cur->c_paths[udepth].p_ptr;
-
-		if (cur->c_paths[i].p_hdr &&
-		    ext4_buf_blocknr(cur->c_paths[i].p_bcb) ==
-			ext4_idx_block(idx)) {
-			if (cur->c_paths[i].p_ptr == -1)
-				cur->c_paths[i].p_ptr = 0;
-			continue;
-		}
-
-		ext4_ext_cursor_unpin(cur, i, 1);
-		npath.p_bcb = fs_bread(sb, ext4_idx_block(idx), &ret);
-		if (ret)
-			goto out;
-		data = npath.p_bcb->b_data;
-		npath.p_hdr = (struct ext4_extent_header *)data;
-		npath.p_ptr = 0;
-		ext4_ext_cursor_set_buf(cur, i, &npath);
-
-		hdr = npath.p_hdr;
-		if (hdr->eh_magic != EXT4_EXT_MAGIC) {
-			ret = EIO;
-			goto out;
-		}
-	}
-out:
 	return ret;
 }
 
@@ -2023,7 +2000,6 @@ ext4_ext_delete_node(struct ext4_ext_cursor *cur,
 	return ret;
 }
 
-
 /*
  * ext4_ext_delete -	Delete an extent from an extent tree pointed to by
  * 			item pointer in the leaf. Nodes may be merged
@@ -2036,16 +2012,21 @@ ext4_ext_delete_node(struct ext4_ext_cursor *cur,
  */
 int
 ext4_ext_delete_range(struct ext4_ext_cursor *cur,
+		      ext4_lblk_t fromlblk,
 		      ext4_lblk_t tolblk)
 {
 	int ret = 0;
 	uint16_t nritems;
-	int i = 0;
+	int depth = 0;
 	int rootdepth;
 	struct ext4_extent_header *hdr;
+	struct ext4_extent *ext;
+	ssize_t ptr;
+	ext4_lblk_t endlblk;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 	hdr = cur->c_paths[0].p_hdr;
+	ptr = cur->c_paths[0].p_ptr;
 
 	/*
 	 * We return ENOENT as error if we found the buffer of the lowest
@@ -2054,82 +2035,120 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 	 */
 	if (!hdr || !ext4_ext_header_entries(hdr))
 		return ENOENT;
-	if (cur->c_paths[0].p_ptr == -1)
+	if (ptr == -1)
 		return ENOENT;
-	if (cur->c_paths[0].p_ptr >= ext4_ext_header_entries(hdr))
+	if (ptr >= ext4_ext_header_entries(hdr))
 		return ENOENT;
 
-	while (i <= rootdepth) {
-		ssize_t ptr;
+	/*
+	 * Calculate the last logical block of the current extent.
+	 */
+	ext = EXT_FIRST_EXTENT(hdr) + ptr;
+	endlblk = ext4_ext_lblock(ext) + ext4_ext_len(ext) - 1;
 
-		if (!i) {
+	/*
+	 * In case the last logical block of the current extent
+	 * is smaller than the first logical block we are going
+	 * to remove, we increment the extent pointer of the
+	 * cursor.
+	 */
+	if (endlblk < fromlblk) {
+		bool nonext;
+
+		/*
+		 * Increment the extent pointer to point to the
+		 * next extent.
+		 */
+		ret = ext4_ext_increment(cur, &nonext);
+		if (ret)
+			goto out;
+
+		/*
+		 * The current extent is already the last extent in
+		 * the tree, so we just return success here.
+		 */
+		if (nonext)
+			goto out;
+	}
+
+	while (depth <= rootdepth) {
+		if (!depth) {
 			int stop;
 
+			/*
+			 * Delete as much extents as we can.
+			 */
 			ret = ext4_ext_delete_leaf(cur, tolblk,
 						   &stop);
 			if (ret)
 				goto out;
 
-			if (stop)
+			if (stop) {
+				/*
+				 * Since the current extent has its logical
+				 * block number greater than @tolblk,
+				 * we are done.
+				 */
 				break;
+			}
 			/*
-			 * Since there are no more items we could delete,
-			 * we have to go to one level above to switch to the
+			 * Since there are no more items in the leaf,
+			 * we have to go one level above to switch to the
 			 * next leaf.
 			 */
-			i++;
+			depth++;
 			continue;
 		}
 
-		hdr = cur->c_paths[i - 1].p_hdr;
+		hdr = cur->c_paths[depth - 1].p_hdr;
 		nritems = ext4_ext_header_entries(hdr);
 
 		/*
 		 * Now we don't need the children path anymore.
 		 */
-		ext4_ext_cursor_unpin(cur, i - 1, 1);
+		ext4_ext_cursor_unpin(cur, depth - 1, 1);
 		if (!nritems) {
-			hdr = cur->c_paths[i].p_hdr;
-			ptr = cur->c_paths[i].p_ptr;
+			hdr = cur->c_paths[depth].p_hdr;
+			ptr = cur->c_paths[depth].p_ptr;
 
-			ret = ext4_ext_delete_node(cur, i);
+			ret = ext4_ext_delete_node(cur, depth);
 			if (ret)
 				goto out;
 
 			nritems = ext4_ext_header_entries(hdr);
 			if (ptr >= nritems) {
 				/*
-				 * Go to one level above
+				 * Go one level above
 				 */
-				i++;
+				depth++;
 			} else {
-				ret = ext4_ext_reload_paths(cur, i);
+				ret = ext4_ext_reload_paths(cur, depth);
 				if (ret)
 					goto out;
 				/*
 				 * Go to the bottom level (aka the leaf).
 				 */
-				i = 0;
+				depth = 0;
 			}
 		} else {
-			hdr = cur->c_paths[i].p_hdr;
+			hdr = cur->c_paths[depth].p_hdr;
 			nritems = ext4_ext_header_entries(hdr);
-			ptr = cur->c_paths[i].p_ptr;
+			ptr = cur->c_paths[depth].p_ptr;
 
 			if (ptr == nritems - 1) {
 				/*
-				 * Go to one level above
+				 * Go one level above
 				 */
-				i++;
+				depth++;
 			} else {
-				cur->c_paths[i].p_ptr = ++ptr;
-				ret = ext4_ext_reload_paths(cur, i);
+				cur->c_paths[depth].p_ptr = ++ptr;
+				ret = ext4_ext_reload_paths(cur, depth);
 				if (ret)
 					goto out;
 				/*
 				 * Go to the bottom level (aka the leaf).
 				 */
-				i = 0;
+				depth = 0;
 			}
 		}
 	}
@@ -2140,8 +2159,8 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 	 * 1. We found that there is no more extents at the right
 	 * 2. We found that the next extent has key larger than @tolblk
 	 */
-	ext4_assert(!i || i == rootdepth + 1);
-	if (!i) {
+	ext4_assert(!depth || depth == rootdepth + 1);
+	if (!depth) {
 		/*
 		 * We might have removed the leftmost key in the node,
 		 * so we need to update the first key of the right
