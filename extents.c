@@ -1468,7 +1468,7 @@ ext4_ext_decrement(struct ext4_ext_cursor *cur, bool *noprevp)
 
 	for (i = 0; i <= rootdepth; i++) {
 		struct ext4_extent_header *hdr;
-		
+
 		hdr = cur->c_paths[i].p_hdr;
 		ptr = cur->c_paths[i].p_ptr;
 		if (hdr && ptr && ptr != -1)
