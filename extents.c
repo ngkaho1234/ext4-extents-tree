@@ -268,10 +268,10 @@ ext4_ext_len(struct ext4_extent *ext)
 }
 
 /*
- * ext4_ext_mark_initialized -	Remove an extent's unwritten marking
+ * ext4_ext_mark_written -	Remove an extent's unwritten marking
  */
 static inline void
-ext4_ext_mark_initialized(struct ext4_extent *ext)
+ext4_ext_mark_written(struct ext4_extent *ext)
 {
 	ext->ee_len = ext4_cpu_to_le16(ext4_ext_len(ext));
 }
@@ -280,9 +280,13 @@ ext4_ext_mark_initialized(struct ext4_extent *ext)
  * ext4_ext_len -	Set the number of blocks covered by an extent
  */
 static inline void
-ext4_ext_store_len(struct ext4_extent *ext, ext4_extlen_t len)
+ext4_ext_store_len(struct ext4_extent *ext,
+		   ext4_extlen_t len,
+		   bool unwritten)
 {
 	ext->ee_len = ext4_cpu_to_le16(len);
+	if (unwritten)
+		ext4_ext_mark_unwritten(ext);
 }
 
 /*
@@ -1914,27 +1918,72 @@ ext4_ext_delete_leaf(struct ext4_ext_cursor *cur,
 {
 	int ret = 0;
 	ssize_t ptr;
+	int rootdepth;
 	uint16_t nritems;
 	struct ext4_extent *ext;
 	struct ext4_extent_header *hdr;
 
+	rootdepth = ext4_ext_cursor_depth(cur);
 	*stopp = 0;
 
 	while (1) {
+		bool unwritten;
+		ext4_extlen_t len;
+		ext4_extlen_t flen;
+		ext4_lblk_t endlblk;
+		ext4_lblk_t startlblk;
+		ext4_fsblk_t blocknr;
+
 		ptr = cur->c_paths[0].p_ptr;
 		hdr = cur->c_paths[0].p_hdr;
 		nritems = ext4_ext_header_entries(hdr);
 
 		ext4_assert(nritems > 0);
 
+		ext = EXT_FIRST_EXTENT(hdr) + ptr;
+		blocknr = ext4_ext_block(ext);
+		startlblk = ext4_ext_lblock(ext);
+		endlblk = startlblk + ext4_ext_len(ext) - 1;
+		len = endlblk - startlblk + 1;
+		unwritten = ext4_ext_is_unwritten(ext);
+
 		/*
 		 * We have to stop if the extent's key
 		 * is greater than @tolblk.
-		 *
-		 * TODO: What about being more precise?
 		 */
-		ext = EXT_FIRST_EXTENT(hdr) + ptr;
-		if (ext4_ext_lblock(ext) > tolblk) {
+		if (tolblk < startlblk) {
+			*stopp = 1;
+			break;
+		}
+
+		if (tolblk < endlblk) {
+			/*
+			 * In case @tolblk is smaller than the last
+			 * logical block of the extent, we do not
+			 * need to delete the extent. We modify it only.
+			 */
+
+			/*
+			 * TODO: Unmap the underlying blocks!
+			 */
+			flen = tolblk - startlblk + 1;
+
+			/*
+			 * Adjust the starting block and length of the
+			 * current extent.
+			 */
+			blocknr += flen;
+			startlblk = tolblk + 1;
+			len = endlblk - startlblk + 1;
+			ext4_ext_store_lblock(ext, startlblk);
+			ext4_ext_store_len(ext, len, unwritten);
+			ext4_ext_store_block(ext, blocknr);
+
+			if (!rootdepth)
+				cur->c_cursor_op.c_root_dirty_func(cur);
+			else
+				fs_mark_buffer_dirty(cur->c_paths[0].p_bcb);
+
 			*stopp = 1;
 			break;
 		}
@@ -1948,6 +1997,7 @@ ext4_ext_delete_leaf(struct ext4_ext_cursor *cur,
 		/*
 		 * TODO: Unmap the underlying blocks!
 		 */
+		flen = len;
 
 		/*
 		 * There are no more items we could delete.
@@ -2023,6 +2073,7 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 	struct ext4_extent *ext;
 	ssize_t ptr;
 	ext4_lblk_t endlblk;
+	ext4_lblk_t startlblk;
 
 	rootdepth = ext4_ext_cursor_depth(cur);
 	hdr = cur->c_paths[0].p_hdr;
@@ -2044,16 +2095,17 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 	 * Calculate the last logical block of the current extent.
 	 */
 	ext = EXT_FIRST_EXTENT(hdr) + ptr;
-	endlblk = ext4_ext_lblock(ext) + ext4_ext_len(ext) - 1;
+	startlblk = ext4_ext_lblock(ext);
+	endlblk = startlblk + ext4_ext_len(ext) - 1;
 
-	/*
-	 * In case the last logical block of the current extent
-	 * is smaller than the first logical block we are going
-	 * to remove, we increment the extent pointer of the
-	 * cursor.
-	 */
-	if (endlblk < fromlblk) {
+	if (fromlblk > endlblk) {
 		bool nonext;
+
+		/*
+		 * The last logical block of the current extent is smaller
+		 * than the first logical block we are going to remove,
+		 * thus we increment the extent pointer of the cursor.
+		 */
 
 		/*
 		 * Increment the extent pointer to point to the
@@ -2069,6 +2121,90 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 		 */
 		if (nonext)
 			goto out;
+	} else if (fromlblk > startlblk) {
+		bool unwritten;
+		ext4_extlen_t len;
+
+		/*
+		 * @fromlblk is in the range of the current extent,
+		 * but does not sit right on the starting block.
+		 *
+		 * In this case we need to modify the current extent.
+		 * and free some blocks, since we do not really want
+		 * to remove and reinsert a new one.
+		 */
+
+		len = fromlblk - startlblk + 1;
+		unwritten = ext4_ext_is_unwritten(ext);
+		ext4_ext_store_len(ext, len, unwritten);
+
+		if (!rootdepth)
+			cur->c_cursor_op.c_root_dirty_func(cur);
+		else
+			fs_mark_buffer_dirty(cur->c_paths[0].p_bcb);
+
+		/*
+		 * Free the range of blocks starting from @fromlblk
+		 * up to either @endlblk or @tolblk.
+		 */
+		if (tolblk < endlblk) {
+			ext4_extlen_t flen;
+			ext4_fsblk_t blocknr;
+			struct ext4_extent next;
+
+			/*
+			 * In case we free up space inside an extent
+			 * while not touching both ends, we need to
+			 * unavoidably insert a new extent right after
+			 * the modified current extent, and that may
+			 * cause tree splitting.
+			 */
+
+			/*
+			 * TODO: Now we need to free up space first.
+			 */
+			flen = tolblk - fromlblk + 1;
+			blocknr = ext4_ext_block(ext) + len;
+
+			blocknr += flen;
+			startlblk = fromlblk + flen;
+			len = endlblk - startlblk + 1;
+
+			ext4_ext_store_lblock(&next, startlblk);
+			ext4_ext_store_len(&next, len, unwritten);
+			ext4_ext_store_block(&next, blocknr);
+			ret = ext4_ext_insert(cur, &next);
+
+			/*
+			 * After we free up the space and insert a new
+			 * extent, we are done.
+			 */
+			goto out;
+		} else {
+			bool nonext;
+			ext4_extlen_t flen;
+			ext4_fsblk_t blocknr;
+
+			/*
+			 * Otherwise we do not need any insertion,
+			 * which also means that no extra space may be
+			 * allocated for tree splitting.
+			 */
+			flen = endlblk - fromlblk;
+			blocknr = ext4_ext_block(ext) + len;
+
+			/*
+			 * TODO: Now we need to free up space first.
+			 */
+
+			/*
+			 * Increment the extent pointer to point to the
+			 * next extent.
+			 */
+			ret = ext4_ext_increment(cur, &nonext);
+			if (ret)
+				goto out;
+		}
 	}
 
 	while (depth <= rootdepth) {
