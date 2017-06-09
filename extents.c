@@ -2652,7 +2652,10 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 			 * Reload the cursor's path so that it points to
 			 * a valid key again.
 			 */
-			ext4_ext_reload_paths(cur, i, false);
+			ret = ext4_ext_reload_paths(cur, i, true);
+			if (ret)
+				goto out;
+
 			ret = ext4_ext_tree_shrink(cur);
 		} else {
 			/*
