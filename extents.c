@@ -2189,6 +2189,9 @@ ext4_ext_balance(struct ext4_ext_cursor *cur)
 			if (ret)
 				goto out;
 
+			/*
+			 * Try to shrink the tree as short as possible.
+			 */
 			ret = ext4_ext_tree_shrink(cur);
 		} else {
 			/*
@@ -2491,13 +2494,6 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 			 * node is balanced.
 			 */
 			ret = ext4_ext_balance(cur);
-			if (ret)
-				goto out;
-
-			/*
-			 * Try to shrink the tree as short as possible.
-			 */
-			ret = ext4_ext_tree_shrink(cur);
 		} else {
 			/*
 			 * For empty root we need to make sure that the
