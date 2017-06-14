@@ -2060,156 +2060,6 @@ ext4_ext_delete_node(struct ext4_ext_cursor *cur,
 }
 
 /*
- * ext4_ext_balance -	Do balancing for the tree
- *
- * @cur:	Cursor to an extent tree
- *
- * Return 0 when success, or return values of ext4_ext_try_merge(),
- * ext4_ext_reload_paths() or ext4_ext_tree_shrink().
- */
-int
-ext4_ext_balance(struct ext4_ext_cursor *cur)
-{
-	int ret = 0;
-	uint16_t nritems;
-	int i;
-	int rootdepth;
-	struct ext4_extent_header *hdr;
-
-	rootdepth = ext4_ext_cursor_depth(cur);
-	hdr = cur->c_paths[0].p_hdr;
-
-	for (i = 0; i <= rootdepth; i++) {
-		int merged = 0;
-		ssize_t ptr;
-		struct ext4_ext_cursor *ncur;
-		struct ext4_extent_idx *idx;
-		struct ext4_extent_header *uhdr;
-
-		hdr = cur->c_paths[i].p_hdr;
-
-		if (i) {
-			/*
-			 * Delete the item pointed to by the path.
-			 */
-			ext4_ext_delete_item(cur, i);
-		}
-
-		/*
-		 * If we are deleting item at the root level,
-		 * or if the root level of the tree is a leaf,
-		 * we are done.
-		 */
-		if (i == rootdepth)
-			break;
-
-		nritems = ext4_ext_header_entries(hdr);
-		if (nritems) {
-			/*
-			 * Try to merge the node with left sibling or
-			 * right sibling.
-			 */
-			ret = ext4_ext_try_merge(cur, i, &ncur, &merged);
-			if (ret)
-				goto out;
-
-			if (merged == 1) {
-				ext4_assert(ncur);
-
-				/*
-				 * After merging to left sibling,
-				 * we need not to update the first key of the
-				 * left sibling at every level.
-				 */
-
-				/*
-				 * Throw away the cursor to sibling.
-				 */
-				ext4_ext_cursor_free(ncur);
-			} else if (merged == 2) {
-				ext4_assert(ncur);
-
-				/*
-				 * After merging to right sibling,
-				 * we need to update the first key of the
-				 * right sibling at every level until we
-				 * meet a non-leftmost key.
-				 */
-				ext4_ext_update_index(ncur, i, 0);
-
-				/*
-				 * Throw away the cursor to sibling.
-				 */
-				ext4_ext_cursor_free(ncur);
-			} else {
-				/*
-				 * No merge happens, so do nothing.
-				 */
-				ext4_assert(!ncur);
-				break;
-			}
-		}
-		/*
-		 * If we have merged two nodes into one, or we leave
-		 * nothing in the node after deletion of an item,
-		 * we free the block of the node.
-		 *
-		 * At the next iteration we delete the key of the node.
-		 */
-
-		/*
-		 * Get the respective key in parent node.
-		 */
-		uhdr = cur->c_paths[i + 1].p_hdr;
-		ptr = cur->c_paths[i + 1].p_ptr;
-		idx = EXT_FIRST_INDEX(uhdr) + ptr;
-
-		/*
-		 * Unpin the buffer of this node, and free
-		 * the block of it.
-		 */
-		ext4_ext_cursor_unpin(cur, i, 1);
-		cur->c_cursor_op.c_free_block_func(cur, ext4_idx_block(idx));
-	}
-	if (i < rootdepth) {
-		/*
-		 * We might have removed the leftmost key in the node,
-		 * so we need to update the first key of the right
-		 * sibling at every level until we meet a non-leftmost
-		 * key.
-		 */
-		ext4_ext_update_index(cur, i, 0);
-	} else {
-		if (!ext4_ext_tree_empty(cur)) {
-			/*
-			 * Reload the cursor's path so that it points to
-			 * a valid key again.
-			 */
-			ret = ext4_ext_reload_paths(cur, i, false);
-			if (ret)
-				goto out;
-
-			/*
-			 * Try to shrink the tree as short as possible.
-			 */
-			ret = ext4_ext_tree_shrink(cur);
-		} else {
-			/*
-			 * For empty root we need to make sure that the
-			 * depth of the root level is 0.
-			 */
-			hdr = cur->c_root;
-			ext4_ext_header_set_depth(hdr, 0);
-			cur->c_cursor_op.c_root_dirty_func(cur);
-			ext4_ext_cursor_unpin(cur, rootdepth, 1);
-		}
-	}
-
-out:
-	return ret;
-}
-
-/*
  * ext4_ext_delete-range -	Delete the mapping in extent tree starting
  * 				from @fromlblk to @tolblk inclusively.
  * 				Caller must use ext4_ext_lookup_extent()
@@ -2222,8 +2072,7 @@ out:
  * Return 0 on success, ENOENT if there is no item to be deleted,
  * return values of ext4_ext_increment(), ext4_ext_insert(),
  * ext4_ext_delete_leaf(), ext4_ext_delete_node() ext4_ext_reload_paths(),
- * ext4_ext_balance() or ext4_ext_tree_shrink().
- * Cursor MUST be discarded after deletion.
+ * ext4_ext_tree_shrink(). Cursor MUST be discarded after deletion.
  */
 int
 ext4_ext_delete_range(struct ext4_ext_cursor *cur,
@@ -2471,12 +2320,6 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 		 * key.
 		 */
 		ext4_ext_update_index(cur, 0, 1);
-
-		/*
-		 * Do balancing to make sure that the current
-		 * node is balanced.
-		 */
-		ret = ext4_ext_balance(cur);
 	} else {
 		if (!ext4_ext_tree_empty(cur)) {
 			/*
@@ -2488,12 +2331,6 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 			ret = ext4_ext_reload_paths(cur, rootdepth, true);
 			if (ret)
 				goto out;
-
-			/*
-			 * Do balancing to make sure that the current
-			 * node is balanced.
-			 */
-			ret = ext4_ext_balance(cur);
 		} else {
 			/*
 			 * For empty root we need to make sure that the
