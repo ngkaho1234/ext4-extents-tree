@@ -2382,7 +2382,12 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 	if (cur->c_paths[0].p_ptr >= ext4_ext_header_entries(hdr))
 		return ENOENT;
 
-	for (i = 0; i <= rootdepth; i++) {
+	/*
+	 * Delete the extent at leaf.
+	 */
+	ext4_ext_delete_item(cur, 0);
+
+	for (i = 0; i < rootdepth; i++) {
 		int merged = 0;
 		ssize_t ptr;
 		struct ext4_ext_cursor *ncur;
@@ -2390,18 +2395,6 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 		struct ext4_extent_header *uhdr;
 
 		hdr = cur->c_paths[i].p_hdr;
-
-		/*
-		 * Delete the item pointed to by the path.
-		 */
-		ext4_ext_delete_item(cur, i);
-
-		/*
-		 * If we are deleting item at the root level,
-		 * we are done.
-		 */
-		if (i == rootdepth)
-			break;
 
 		nritems = ext4_ext_header_entries(hdr);
 		if (nritems) {
@@ -2470,7 +2463,13 @@ ext4_ext_delete(struct ext4_ext_cursor *cur)
 		 */
 		ext4_ext_cursor_unpin(cur, i, 1);
 		cur->c_cursor_op.c_free_block_func(cur, ext4_idx_block(idx));
+
+		/*
+		 * Delete the index of the current node at parent node.
+		 */
+		ext4_ext_delete_item(cur, i + 1);
 	}
+
 	if (i < rootdepth) {
 		/*
 		 * We might have removed the leftmost key in the node,
