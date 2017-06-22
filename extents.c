@@ -2148,7 +2148,7 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 		 * to remove and reinsert a new one.
 		 */
 
-		len = fromlblk - startlblk + 1;
+		len = fromlblk - startlblk;
 		unwritten = ext4_ext_is_unwritten(ext);
 		ext4_ext_store_len(ext, len, unwritten);
 
@@ -2204,7 +2204,7 @@ ext4_ext_delete_range(struct ext4_ext_cursor *cur,
 			 * which also means that no extra space may be
 			 * allocated for tree splitting.
 			 */
-			flen = endlblk - fromlblk;
+			flen = endlblk - fromlblk + 1;
 			blocknr = ext4_ext_block(ext) + len;
 
 			/*
